@@ -29,7 +29,7 @@ const r = await fetch(`${BASE}/api/new?pid=a`).then(r => r.json());
 assert.match(r.code, /^[A-Z]{4}$/);
 const code = r.code;
 const bots = [await bot('a', 'Ana', code), await bot('b', 'Bea', code), await bot('c', 'Carlos', code)];
-await sleep(300);
+for (let i = 0; i < 50 && bots[0].last.lobby.length < 3; i++) await sleep(100);
 assert.equal(bots[0].last.lobby.length, 3);
 assert.equal(bots[0].last.host, 'a');
 
@@ -41,7 +41,7 @@ assert.equal(bots[0].last.host, 'a');
 }
 
 bots[0].send({ a: 'start' });
-await sleep(300);
+for (let i = 0; i < 50 && !(bots[1].last.view); i++) await sleep(100); // por internet tarda un poco
 assert.equal(bots[1].last.view.phase, 'ready');
 
 let steps = 0;
