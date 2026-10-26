@@ -186,5 +186,26 @@ for (let g = 0; g < 400; g++) {
   assert.equal(s2.turn, 1);
 }
 
+// Tu ejemplo: cambias y cae tu 5 al medio; si tienes otro 5 puedes echarlo después, una sola vez
+{
+  const st = newGame([{ id: 'a' }, { id: 'b' }]);
+  startRound(st); st.phase = 'play'; st.turn = 0;
+  st.players[0].hand = [{ s: 'o', r: 5 }, { s: 'c', r: 5 }, { s: 'e', r: 5 }, { s: 'b', r: 2 }];
+  st.players[1].hand = [{ s: 'b', r: 5 }, { s: 'o', r: 1 }, { s: 'e', r: 4 }, { s: 'c', r: 3 }];
+  st.deck.push({ s: 'o', r: 1 });
+  act(st, 0, { a: 'draw' });
+  let r = act(st, 0, { a: 'swap', slot: 0 }); // el 5 de oros va al medio (no se pueden echar dos a la vez)
+  assert.equal(st.discard.at(-1).r, 5);
+  assert.equal(st.players[0].hand.filter(Boolean).length, 4);
+  r = act(st, 0, { a: 'match', slot: 1 }); // echa su otro 5 después
+  assert.ok(r.ok && r.events[0].ok);
+  assert.equal(st.players[0].hand.filter(Boolean).length, 3);
+  r = act(st, 0, { a: 'match', slot: 2 }); // un tercer 5: ya no, solo una vez
+  assert.equal(r.ok, false);
+  r = act(st, 1, { a: 'match', slot: 0 }); // ni el rival
+  assert.equal(r.ok, false);
+  console.log('✓ echar tu segundo 5 después de cambiar el primero: sí, una vez; dos a la vez: no');
+}
+
 console.log(`Se van ${leaves}, desconexiones ${aways}, se quedan solos ${alones}`);
 console.log(`OK: ${games} partidas, ${rounds} rondas, ${actions} acciones, ${cabos} cabos, echadas buenas ${matchesOk} / malas ${matchesBad}`);

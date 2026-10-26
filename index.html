@@ -1317,7 +1317,9 @@ addEventListener('pointerup', e => {
   } else send({ a: 'move', from: d.slot, to: t.slot });
 });
 addEventListener('pointercancel', endDrag);
-$('#game').addEventListener('lostpointercapture', () => { if (drag && drag.moved) endDrag(); });
+// Solo cuenta si se pierde el enganche que pusimos en #game. En pantallas táctiles, al
+// engancharlo, la carta "suelta" el dedo y ese aviso sube hasta #game: ese no hay que hacerle caso.
+$('#game').addEventListener('lostpointercapture', e => { if (e.target === $('#game') && drag && drag.moved && e.pointerId === drag.id) endDrag(); });
 addEventListener('blur', endDrag);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'visible') endDrag(); });
 // Red de seguridad: un arrastre sin movimiento durante 5 s se da por terminado
