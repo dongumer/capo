@@ -189,6 +189,25 @@ h2 { margin: 0; font-family: var(--display); font-weight: 800; font-size: 24px; 
 #banner.show { animation: bannerIn 1.9s cubic-bezier(.2,.9,.3,1.3) forwards; }
 @keyframes bannerIn { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.5); } 15% { opacity: 1; transform: translate(-50%, -50%) scale(1.06); } 25% { transform: translate(-50%, -50%) scale(1); } 80% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -50%) scale(1); } }
 
+#big { position: absolute; z-index: 4; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; pointer-events: none; background: radial-gradient(closest-side, rgba(4,8,6,.72), rgba(4,8,6,.35)); animation: fadeIn .25s ease-out; }
+#big .cap { font: 800 20px var(--display); background: rgba(8,14,11,.85); padding: 6px 16px; border-radius: 12px; }
+#big .cards { display: flex; gap: min(4vw, 28px); }
+#big figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+#big .bc { height: min(56vh, 330px); aspect-ratio: 140 / 200; border-radius: 14px; background-size: cover; box-shadow: 0 18px 40px rgba(0,0,0,.6); animation: bigIn .45s cubic-bezier(.2,.9,.3,1.2) both; }
+#big figure:nth-child(2) .bc { animation-delay: .08s; }
+#big figcaption { font-weight: 800; font-size: 15px; color: #e8dcb8; }
+#big .bar { width: min(260px, 50vw); height: 6px; border-radius: 3px; background: rgba(255,255,255,.2); overflow: hidden; }
+#big .bar i { display: block; height: 100%; background: var(--gold); transform-origin: left; animation: shrink linear forwards; }
+@keyframes bigIn { from { transform: translateY(30px) rotateY(90deg) scale(.8); opacity: 0; } }
+@keyframes fadeIn { from { opacity: 0; } }
+@keyframes shrink { to { transform: scaleX(0); } }
+#count { position: absolute; z-index: 21; left: 50%; top: 46%; transform: translate(-50%, -50%); pointer-events: none; text-align: center; }
+#count b { display: block; font: 800 min(40vh, 190px)/1 var(--display); color: #fff3cf; text-shadow: 0 8px 0 #a33a26, 0 14px 40px rgba(0,0,0,.6); animation: tick .9s ease-out both; }
+#count span { font-weight: 800; background: rgba(8,14,11,.8); padding: 6px 14px; border-radius: 12px; }
+@keyframes tick { 0% { transform: scale(1.6); opacity: 0; } 20% { transform: scale(1); opacity: 1; } 80% { opacity: 1; } 100% { transform: scale(.85); opacity: 0; } }
+#turnPill { position: absolute; z-index: 19; left: 50%; top: 40%; transform: translate(-50%, -50%); pointer-events: none; display: flex; align-items: center; gap: 10px; background: rgba(8,14,11,.88); border: 2px solid var(--gold); border-radius: 18px; padding: 10px 20px; font: 800 24px var(--display); animation: pill 1.3s ease-out forwards; }
+#turnPill i { font-style: normal; font-size: 34px; }
+@keyframes pill { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.8); } 15% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 75% { opacity: 1; } 100% { opacity: 0; } }
 #toast { position: fixed; z-index: 40; left: 50%; top: calc(60px + env(safe-area-inset-top)); transform: translateX(-50%); background: #1b2420; color: #fff; border-radius: 14px; padding: 9px 16px; font-weight: 700; font-size: 15px; box-shadow: 0 8px 24px rgba(0,0,0,.4); max-width: min(90vw, 480px); text-align: center; transition: opacity .25s, transform .25s; }
 #toast.err { background: #8f2618; }
 #toast:not(.on) { opacity: 0; transform: translate(-50%, -10px); pointer-events: none; }
@@ -302,6 +321,9 @@ h2 { margin: 0; font-family: var(--display); font-weight: 800; font-size: 24px; 
   <div class="hud" id="mePlate"></div>
   <div class="hud" id="actions"></div>
   <div id="banner"></div>
+  <div id="bigHost"></div>
+  <div id="countHost"></div>
+  <div id="pillHost"></div>
   <div id="sheetHost"></div>
 </section>
 
@@ -562,10 +584,11 @@ async function pump() {
       S.V = m.view;
       if (!m.view) { S.reveal = {}; S.sel = {}; renderLobby(); show('lobby'); continue; }
       if (document.getElementById('game').hidden) show('game');
-      if (!old || old.round !== m.view.round) { S.reveal = {}; S.peekSince = Date.now(); }
+      if (!old || old.round !== m.view.round || m.events.some(e => e.t === 'deal')) { S.reveal = {}; S.peekSince = Date.now(); hideBig(); }
       clearStaleSelection();
       render();
       const fast = S.queue.length > 2;
+      S.msgT0 = Date.now();
       for (const ev of m.events) await animate(ev, old || m.view, m.view, fast);
       render();
     }
@@ -578,20 +601,16 @@ function shareLink() { return `${location.origin}${location.pathname}?sala=${S.c
 function renderLobby() {
   const m = S.msg, host = m.host === S.pid;
   $('#codeTiles').innerHTML = m.code.split('').map(c => `<span>${c}</span>`).join('');
-  $('#pCount').textContent = `Jugadores (${m.lobby.length} de 6)`;
+  $('#pCount').textContent = `Jugadores (${m.lobby.length} de 8)`;
   $('#pList').innerHTML = m.lobby.map(p => `
     <li><span class="av" style="border-color:${esc(p.color)}">${esc(p.avatar)}</span>
       <span class="nm">${esc(p.name)}${p.id === S.pid ? ' (tú)' : ''}<br><span class="st"><span class="dot ${p.online ? '' : 'off'}"></span>${p.id === m.host ? 'Ha creado la partida' : p.online ? 'Conectado' : 'Desconectado'}</span></span>
       ${host && p.id !== S.pid ? `<button class="x" data-kick="${esc(p.id)}" aria-label="Echar a ${esc(p.name)}">✕</button>` : ''}</li>`).join('');
-  const st = m.settings;
-  const seg = (k, opts, fmt) => `<div class="seg">${opts.map(o => `<button data-set="${k}" data-v="${o}" aria-pressed="${st[k] === o}" ${host ? '' : 'disabled'}>${fmt ? fmt(o) : o}</button>`).join('')}</div>`;
   $('#setBox').innerHTML = `
-    <div class="label">Reglas de la partida${host ? '' : ' (las elige quien la ha creado)'}</div>
-    <div class="set"><span>Se pierde al llegar a</span>${seg('limit', [50, 100, 150])}</div>
-    <div class="set"><span>Castigo por Capo fallido</span>${seg('caboPenalty', [0, 5, 10, 15], v => '+' + v)}</div>
-    <div class="set"><span>Capo acertado se apunta 0</span>${seg('caboZero', [true, false], v => (v ? 'Sí' : 'No'))}</div>`;
+    <div class="label">Cómo se puntúa</div>
+    <p style="margin:0">Cuando alguien canta <b>¡Capo!</b> se da la última vuelta y quien menos sume <b>gana la ronda (+1)</b>. Jugad las rondas que queráis: al terminar, gana quien más rondas haya ganado.</p>`;
   $('#startBtn').hidden = !host;
-  $('#botBtn').hidden = !(LOCAL && host && m.lobby.length < 6);
+  $('#botBtn').hidden = !(LOCAL && host && m.lobby.length < 8);
   $('#startBtn').disabled = m.lobby.length < 2;
   $('#startBtn').textContent = m.lobby.length < 2 ? 'Esperando jugadores…' : 'Empezar partida';
   $('#waitTxt').hidden = host;
@@ -601,11 +620,6 @@ function renderLobby() {
 document.addEventListener('click', e => {
   const k = e.target.closest('[data-kick]');
   if (k) { send({ a: 'kick', pid: k.dataset.kick }); return; }
-  const s = e.target.closest('[data-set]');
-  if (s && !s.disabled) {
-    const raw = s.dataset.v, v = raw === 'true' ? true : raw === 'false' ? false : +raw;
-    send({ a: 'settings', settings: { [s.dataset.set]: v } });
-  }
 });
 
 // ---------- Geometría de la mesa (coordenadas del tapete: 1000 × 620) ----------
@@ -620,7 +634,7 @@ function seatAngle(V, p) {
 function handCenter(V, p) {
   if (p === V.me) return { x: CX - 40, y: CY + 200, r: 0, s: SC.me };
   const a = seatAngle(V, p);
-  return { x: CX + 345 * Math.cos(a), y: CY + 190 * Math.sin(a), r: a * 180 / Math.PI - 90, s: SC.other };
+  return { x: CX + 345 * Math.cos(a), y: CY + 190 * Math.sin(a), r: a * 180 / Math.PI - 90, s: V.players.length > 6 ? .32 : SC.other };
 }
 function slotPos(V, p, slot) {
   const h = handCenter(V, p), len = V.players[p].hand.length;
@@ -653,7 +667,6 @@ function makeCard(card, up) {
   return el;
 }
 const keyOf = (p, s) => `h${p}_${s}`;
-const PEEK_SHOW = 2000; // lo que se ven las dos cartas de abajo al repartir
 const elByKey = k => items.querySelector(`[data-key="${k}"]`);
 
 function myHandIdx(V) { return V.players[V.me].hand.map((h, i) => (h ? i : -1)).filter(i => i >= 0); }
@@ -662,11 +675,11 @@ function myHandIdx(V) { return V.players[V.me].hand.map((h, i) => (h ? i : -1)).
 function interaction(V) {
   const it = { deck: false, discard: false, mine: false, others: false };
   if (V.phase !== 'play' || V.turn !== V.me) return it;
-  if (V.step === 'draw') { it.deck = true; it.discard = V.discard.length > 0 && myHandIdx(V).length > 0; }
+  if (V.step === 'draw') it.deck = true;
   if (V.step === 'hold') { it.mine = true; it.discard = V.held && V.held.from === 'deck'; }
   if (V.step === 'power') {
     const pw = V.power;
-    if (pw.type === 10) it.mine = true;
+    if (pw.type === 10 && pw.stage === 'pick') it.mine = true;
     if ((pw.type === 11 || pw.type === 12) && pw.stage === 'pick') { it.mine = S.sel.own == null; it.others = S.sel.tp == null; if (!it.mine && !it.others) { it.mine = it.others = true; } }
   }
   return it;
@@ -753,7 +766,7 @@ function render() {
     el.dataset.seat = pi;
     el.style.transform = `translate3d(${sp.x - 75}px, ${sp.y - 150}px, 0) rotateX(-38deg) scale(1.35)`;
     const badge = V.caboBy === pi ? '<span class="badge cabo">CAPO</span>' : '';
-    el.innerHTML = `<div class="bub" style="border-color:${esc(p.color)}">${esc(p.avatar)}${badge}</div><div class="tagn">${esc(p.name)}</div><div class="pts">${p.total} pts${online ? '' : ' · sin conexión'}</div>`;
+    el.innerHTML = `<div class="bub" style="border-color:${esc(p.color)}">${esc(p.avatar)}${badge}</div><div class="tagn">${esc(p.name)}</div><div class="pts">🏆 ${p.total}${online ? '' : ' · sin conexión'}</div>`;
     frag.append(el);
   });
   items.append(frag);
@@ -773,15 +786,15 @@ function statusText(V) {
     const n = V.players[V.turn].name;
     let what = `Turno de ${n}`;
     if (V.step === 'hold') what = `${n} tiene una carta en la mano`;
-    if (V.step === 'power') what = { 10: `${n} usa la sota: mira una carta suya`, 11: `${n} usa el caballo: cambia cartas a ciegas`, 12: `${n} usa el rey: mira y puede cambiar` }[V.power.type];
+    if (V.step === 'power') what = { 10: V.power.stage === 'seeing' ? `${n} está mirando una carta suya` : `${n} usa la sota: mira una carta suya`, 11: `${n} usa el caballo: cambia cartas a ciegas`, 12: `${n} usa el rey: mira y puede cambiar` }[V.power.type];
     return { t: pre + what };
   }
   let t = '';
-  if (V.step === 'draw') t = 'Te toca: roba del mazo o coge la carta del descarte';
+  if (V.step === 'draw') t = 'Te toca: roba del mazo o canta «¡Capo!»';
   if (V.step === 'hold') t = V.held.from === 'deck' ? 'Cámbiala por una tuya (tócala) o tírala al descarte' : 'Toca la carta tuya por la que la cambias';
   if (V.step === 'power') {
     const pw = V.power;
-    if (pw.type === 10) t = 'Sota: toca una carta tuya para mirarla';
+    if (pw.type === 10) t = pw.stage === 'seeing' ? 'Mírala bien… y pulsa «Ya está»' : 'Sota: toca una carta tuya para mirarla';
     if (pw.type === 11) t = 'Caballo: elige una carta tuya y una de otro para cambiarlas sin verlas';
     if (pw.type === 12) t = pw.stage === 'pick' ? 'Rey: elige una carta tuya y una de otro para mirarlas' : '¿Te las cambias?';
   }
@@ -792,19 +805,20 @@ function renderHUD(V) {
   const st = statusText(V);
   const el = $('#status'); el.textContent = st.t; el.classList.toggle('mine', !!st.mine);
   const me = V.players[V.me];
-  $('#mePlate').innerHTML = `<div class="who"><i style="border-color:${esc(me.color)}">${esc(me.avatar)}</i><div>${esc(me.name)}<small>${me.total} puntos${V.caboBy === V.me ? ' · has cantado Capo' : ''}</small></div></div>
+  $('#mePlate').innerHTML = `<div class="who"><i style="border-color:${esc(me.color)}">${esc(me.avatar)}</i><div>${esc(me.name)}<small>🏆 ${me.total} ${me.total === 1 ? 'ronda ganada' : 'rondas ganadas'}${V.caboBy === V.me ? ' · has cantado Capo' : ''}</small></div></div>
     <button class="ibtn" data-act="reactMenu" aria-label="Reacciones">😀</button><div id="reacts" hidden>${REACTS.map(r => `<button data-react="${r}">${r}</button>`).join('')}</div>`;
   const A = [];
   const host = S.msg.host === S.pid;
   if (V.phase === 'play' && V.turn === V.me) {
     if (V.step === 'draw') {
       A.push(`<button class="abtn go" data-act="draw">Robar del mazo</button>`);
-      if (V.discard.length && myHandIdx(V).length) A.push(`<button class="abtn" data-act="take">Coger descarte</button>`);
       if (V.caboBy === null) A.push(`<button class="abtn cabo" data-act="cabo">¡Capo!</button>`);
     }
     if (V.step === 'hold' && V.held.from === 'deck') A.push(`<button class="abtn" data-act="discard">Tirar al descarte</button>`);
     if (V.step === 'power') {
-      if (V.power.stage === 'decide') {
+      if (V.power.stage === 'seeing') {
+        A.push(`<button class="abtn go" data-act="done">Ya está</button>`);
+      } else if (V.power.stage === 'decide') {
         A.push(`<button class="abtn go" data-act="p12yes">Cambiarlas</button>`, `<button class="abtn" data-act="p12no">Dejarlas así</button>`);
       } else A.push(`<button class="abtn ghost" data-act="skip">No usar el poder</button>`);
     }
@@ -818,15 +832,21 @@ function renderHUD(V) {
     if (!online) A.push(`<button class="abtn ghost" data-act="forceSkip">Saltar a ${esc(cur.name)}</button>`);
   }
   $('#actions').innerHTML = A.join('');
-  if ((V.phase === 'roundEnd' || V.phase === 'gameEnd') && !S.sheet) setTimeout(() => { if (S.V && (S.V.phase === 'roundEnd' || S.V.phase === 'gameEnd') && !S.sheet) openSheet('results'); }, 1600);
+  const endKey = V.phase + V.round;
+  if ((V.phase === 'roundEnd' || V.phase === 'gameEnd') && S.autoKey !== endKey) {
+    S.autoKey = endKey;
+    setTimeout(() => { if (S.V && S.V.phase + S.V.round === endKey) openSheet('results'); }, V.phase === 'gameEnd' ? 300 : 1600);
+  }
   if (V.phase !== 'roundEnd' && V.phase !== 'gameEnd' && S.sheet === 'results') closeSheet();
 }
 
 function clearStaleSelection() {
   const V = S.V;
   if (!V || V.phase !== 'play' || V.turn !== V.me || V.step !== 'power' || V.power.stage !== 'pick') S.sel = {};
-  if (!V || !(V.step === 'power' && V.power && V.power.stage === 'decide' && V.turn === V.me)) {
-    for (const k in S.reveal) if (S.reveal[k].look) delete S.reveal[k];
+  if (!V || !(V.phase === 'play' && V.step === 'power' && V.power && (V.power.stage === 'decide' || V.power.stage === 'seeing') && V.turn === V.me)) {
+    let had = false;
+    for (const k in S.reveal) if (S.reveal[k].look) { delete S.reveal[k]; had = true; }
+    if (had) hideBig();
   }
 }
 
@@ -889,11 +909,45 @@ function floatEmoji(V, p, e) {
   document.body.append(d); setTimeout(() => d.remove(), 1900);
 }
 
+// Cartas en grande en el centro de la pantalla (solo las ve quien las mira)
+function showBig(items, title, ms) {
+  const host = $('#bigHost');
+  host.innerHTML = `<div id="big"><div class="cap">${esc(title)}</div><div class="cards">${items.map(it => `<figure><div class="bc" style="background-image:url(&quot;${faceURL(it.card)}&quot;)"></div><figcaption>${esc(it.cap)}</figcaption></figure>`).join('')}</div>${ms ? `<div class="bar"><i style="animation-duration:${ms}ms"></i></div>` : ''}</div>`;
+}
+function hideBig() { $('#bigHost').innerHTML = ''; }
+function turnPill(p) {
+  const h = $('#pillHost');
+  h.innerHTML = `<div id="turnPill"><i>${esc(p.avatar)}</i>Turno de ${esc(p.name)}</div>`;
+  setTimeout(() => { if (h.firstChild && h.firstChild.textContent.includes(p.name)) h.innerHTML = ''; }, 1400);
+}
+// Al repartir: 3, 2, 1… y tus dos cartas de abajo en grande. El servidor dice cuándo y cuánto.
+async function countdownAndShow(ev, N, events) {
+  const mine = events.filter(e => e.t === 'peek' && e.initial && e.card);
+  const showAt = S.msgT0 + ev.showIn;
+  const host = $('#countHost');
+  for (let n = 3; n >= 1; n--) {
+    const at = showAt - n * 1000;
+    if (Date.now() > at + 900) continue;
+    await sleep(Math.max(0, at - Date.now()));
+    host.innerHTML = `<div id="count"><b>${n}</b>${n === 3 ? '<span>Atento a tus dos cartas de abajo</span>' : ''}</div>`;
+    sfx.pop();
+  }
+  await sleep(Math.max(0, showAt - Date.now()));
+  host.innerHTML = '';
+  const left = Math.max(0, showAt + ev.showMs - Date.now());
+  if (!mine.length || left < 300) return;
+  const order = mine.slice().sort((a, b) => a.slot - b.slot);
+  order.forEach(e => { S.reveal[keyOf(e.p, e.slot)] = { card: e.card, until: Date.now() + left }; });
+  sfx.flick(); render();
+  showBig(order.map((e, i) => ({ card: e.card, cap: i ? 'Abajo a la derecha' : 'Abajo a la izquierda' })), 'Tus cartas de abajo', left);
+  await sleep(left);
+  hideBig(); render();
+}
+
 async function animate(ev, O, N, fast) {
   const me = N.me;
   const who = p => (p === me ? 'Tú' : N.players[p].name);
   if (fast && !['roundEnd', 'react', 'cabo'].includes(ev.t)) {
-    if (ev.t === 'peek' && ev.card) S.reveal[keyOf(ev.p, ev.slot)] = { card: ev.card, until: Date.now() + (ev.initial ? PEEK_SHOW : 3000) };
     return;
   }
   switch (ev.t) {
@@ -910,33 +964,29 @@ async function animate(ev, O, N, fast) {
       }
       await Promise.all(jobs);
       unhide();
+      if (ev.showIn) await countdownAndShow(ev, N, S.msg.events);
       break;
     }
     case 'peek': {
+      if (ev.initial) break; // lo enseña la cuenta atrás del reparto
       const k = keyOf(ev.p, ev.slot);
-      const ms = ev.initial ? PEEK_SHOW : 3200;
       if (ev.card) {
-        S.reveal[k] = { card: ev.card, until: Date.now() + ms };
+        // Sota: la carta se queda a la vista hasta que pulsas «Ya está» (o pasan unos segundos)
+        S.reveal[k] = { card: ev.card, until: Infinity, look: true };
         sfx.flick(); render();
-        setTimeout(render, ms + 100);
-      } else if (!ev.initial) { liftCard(k, 1100); }
+        showBig([{ card: ev.card, cap: 'Tu carta' }], 'Sota: esta es tu carta');
+      } else { liftCard(k, 1600); }
       break;
     }
     case 'start': toast('¡A jugar!'); break;
     case 'turn':
-      if (ev.p === me) { sfx.turn(); buzz(60); }
+      if (ev.p === me) { sfx.turn(); buzz(60); banner('¡Te toca!'); await sleep(fast ? 0 : 500); }
+      else { turnPill(N.players[ev.p]); await sleep(fast ? 0 : 350); }
       break;
     case 'draw': {
       const un = hideKeys(['held']);
       sfx.flick();
       await flyer(null, deckPos(3), heldPos(N, ev.p), { up0: false, up1: !!ev.card });
-      un();
-      break;
-    }
-    case 'take': {
-      const un = hideKeys(['held']);
-      sfx.flick();
-      await flyer(ev.card, discardPos(12), heldPos(N, ev.p), { up0: true, up1: true });
       un();
       break;
     }
@@ -963,8 +1013,10 @@ async function animate(ev, O, N, fast) {
       else { sfx.good(); }
       break;
     case 'skipPower': break;
+    case 'gameEnd': S.autoKey = null; break;
     case 'exchange': {
       const a = keyOf(ev.p, ev.slot), b = keyOf(ev.tp, ev.tslot);
+      hideBig();
       for (const k in S.reveal) if (S.reveal[k].look) delete S.reveal[k];
       render();
       const un = hideKeys([a, b]);
@@ -984,6 +1036,7 @@ async function animate(ev, O, N, fast) {
         S.reveal[a] = { card: ev.mine, until: Infinity, look: true };
         S.reveal[b] = { card: ev.theirs, until: Infinity, look: true };
         sfx.flick(); render();
+        showBig([{ card: ev.mine, cap: 'Tuya' }, { card: ev.theirs, cap: `De ${N.players[ev.tp].name}` }], 'Rey: ¿te las cambias?');
       } else {
         if (ev.tp === me) toast(`${who(ev.p)} está mirando una carta tuya`);
         await Promise.all([liftCard(a, 1100), liftCard(b, 1100)]);
@@ -991,6 +1044,7 @@ async function animate(ev, O, N, fast) {
       break;
     }
     case 'keep':
+      hideBig();
       for (const k in S.reveal) if (S.reveal[k].look) delete S.reveal[k];
       render();
       break;
@@ -1127,7 +1181,7 @@ items.addEventListener('click', e => {
   const zone = (c && c.dataset.zone) || (c && c.dataset.key === 'deck' && 'deck') || (e.target.closest('.zone') && e.target.closest('.zone').dataset.zone);
   const it = interaction(V);
   if (zone === 'deck' && it.deck) return send({ a: 'draw' });
-  if (zone === 'discard' && it.discard) return send({ a: V.step === 'draw' ? 'take' : 'discard' });
+  if (zone === 'discard' && it.discard) return send({ a: 'discard' });
   if (!c || c.dataset.p == null) return;
   const p = +c.dataset.p, slot = +c.dataset.slot;
   if (V.phase !== 'play' || V.turn !== V.me) return;
@@ -1154,32 +1208,35 @@ function openSheet(kind) {
   if (kind === 'results' || kind === 'scores') {
     const R = V && V.results;
     const over = V && V.phase === 'gameEnd';
-    const order = V.players.map((p, i) => i).sort((a, b) => V.players[a].total - V.players[b].total);
-    let title = 'Marcador';
-    let sub = '';
-    if (kind === 'results' && R) {
-      title = over ? (V.winner.includes(V.me) ? '¡Has ganado! 🏆' : `Gana ${V.winner.map(i => V.players[i].name).join(' y ')} 🏆`) : `Fin de la ronda ${V.round}`;
-      if (R.caboBy !== null) sub = R.caboBy === V.me ? `Cantaste Capo y ${R.caboOk ? 'acertaste ✅' : `fallaste ❌ (+${V.settings.caboPenalty})`}` : `${V.players[R.caboBy].name} cantó Capo y ${R.caboOk ? 'acertó ✅' : `falló ❌ (+${V.settings.caboPenalty})`}`;
-      else sub = 'Se acabaron las cartas sin que nadie cantara Capo';
+    const isHost = S.msg.host === S.pid;
+    const showRound = kind === 'results' && R && !over;
+    const order = V.players.map((p, i) => i).sort((a, b) => V.players[b].total - V.players[a].total || (R ? R.sums[a] - R.sums[b] : 0));
+    let title = 'Marcador', sub = '';
+    if (over) title = V.winner.includes(V.me) ? (V.winner.length > 1 ? '¡Empate en cabeza! 🏆' : '¡Has ganado la partida! 🏆') : `Gana ${V.winner.map(i => V.players[i].name).join(' y ')} 🏆`;
+    else if (showRound) {
+      const w = R.winners;
+      title = w.includes(V.me) ? (w.length > 1 ? '¡Empatas la ronda!' : '¡Ganas la ronda!') : `Ronda para ${w.map(i => V.players[i].name).join(' y ')}`;
+      sub = R.caboBy !== null ? `${R.caboBy === V.me ? 'Cantaste' : V.players[R.caboBy].name + ' cantó'} «¡Capo!»` : 'Se acabaron las cartas sin que nadie cantara Capo';
     }
     h = `<h2>${esc(title)}</h2>${sub ? `<p style="margin:0;font-weight:700">${esc(sub)}</p>` : ''}
       <ul class="res">${order.map(i => {
         const p = V.players[i];
-        const ad = R && kind === 'results' ? `<span class="a">${R.add[i] >= 0 ? '+' : ''}${R.add[i]}</span>` : '<span class="a"></span>';
-        const note = R && kind === 'results' ? `<small>Sus cartas: ${R.sums[i]}${R.caboBy === i ? ' · cantó Capo' : ''}</small>` : '';
-        return `<li class="${over && V.winner.includes(i) ? 'win' : ''}"><span class="e">${esc(p.avatar)}</span><span class="n">${esc(p.name)}${i === V.me ? ' (tú)' : ''}${note}</span>${ad}<span class="t">${p.total}</span></li>`;
+        const won = showRound && R.winners.includes(i);
+        const ad = showRound ? `<span class="a">${won ? '+1' : ''}</span>` : '<span class="a"></span>';
+        const note = showRound ? `<small>Sus cartas suman ${R.sums[i]}${R.caboBy === i ? ' · cantó Capo' : ''}</small>` : '';
+        return `<li class="${(over && V.winner.includes(i)) || won ? 'win' : ''}"><span class="e">${esc(p.avatar)}</span><span class="n">${esc(p.name)}${i === V.me ? ' (tú)' : ''}${note}</span>${ad}<span class="t">🏆 ${p.total}</span></li>`;
       }).join('')}</ul>
-      <p style="margin:0;color:#6c6a5f;font-size:14px">Se pierde al llegar a ${V.settings.limit} puntos. Gana quien menos tenga.</p>`;
-    if (kind === 'results' && V.phase === 'roundEnd') h += `<button class="btn btn--main" data-act="nextRound">Siguiente ronda</button><button class="btn" data-act="closeSheet">Ver la mesa</button>`;
-    else if (kind === 'results' && over) h += (S.msg.host === S.pid ? `<button class="btn btn--main" data-act="start">Revancha</button>` : `<p class="wait" style="color:#6c6a5f">Esperando a que ${esc((S.msg.lobby.find(p => p.id === S.msg.host) || {}).name || 'el anfitrión')} pida la revancha…</p>`) + `<button class="btn" data-act="closeSheet">Ver la mesa</button><button class="btn" data-act="leave">Salir</button>`;
-    else h += `<button class="btn" data-act="closeSheet">Cerrar</button>`;
+      <p style="margin:0;color:#6c6a5f;font-size:14px">Cada ronda ganada suma 1. Gana la partida quien más rondas gane.</p>`;
+    if (showRound && V.phase === 'roundEnd') h += `<button class="btn btn--main" data-act="nextRound">Siguiente ronda</button>${isHost ? '<button class="btn" data-act="finish">Terminar la partida</button>' : ''}<button class="btn" data-act="closeSheet">Ver la mesa</button>`;
+    else if (over) h += (isHost ? `<button class="btn btn--main" data-act="start">Otra partida</button>` : `<p class="wait" style="color:#6c6a5f">Esperando a que ${esc((S.msg.lobby.find(p => p.id === S.msg.host) || {}).name || 'el anfitrión')} empiece otra…</p>`) + `<button class="btn" data-act="closeSheet">Ver la mesa</button><button class="btn" data-act="leave">Salir</button>`;
+    else h += `${isHost && V.phase !== 'gameEnd' ? '<button class="btn" data-act="finish">Terminar la partida</button>' : ''}<button class="btn" data-act="closeSheet">Cerrar</button>`;
   }
   if (kind === 'menu') {
     h = `<h2>Partida ${esc(S.code || '')}</h2>
       <button class="btn" data-act="wa">Invitar por WhatsApp</button>
       <button class="btn" data-act="toggleSound">Sonido: ${S.sound ? 'sí' : 'no'}</button>
       <button class="btn" data-act="rules">Cómo se juega</button>
-      ${S.msg && S.msg.host === S.pid ? '<button class="btn" data-act="toLobby">Terminar y volver a la sala</button>' : ''}
+      ${S.msg && S.msg.host === S.pid && S.V && S.V.phase !== 'gameEnd' ? '<button class="btn" data-act="finish">Terminar la partida y ver quién gana</button>' : ''}
       <button class="btn" data-act="leave">Salir de la partida</button>
       <button class="btn btn--main" data-act="closeSheet">Seguir jugando</button>`;
   }
@@ -1192,15 +1249,14 @@ function openSheet(kind) {
   bg.addEventListener('click', e => { if (e.target === bg) closeSheet(); });
   host.append(bg);
 }
-function closeSheet(keepState) { const b = $('#sheetBg'); if (b) b.remove(); if (!keepState) S.sheet = S.sheet === 'results' ? 'dismissed' : null; }
+function closeSheet(keepState) { const b = $('#sheetBg'); if (b) b.remove(); if (!keepState) S.sheet = null; }
 function rulesHTML() {
   const m = (s, r) => `<span class="mini" style="background-image:url(&quot;${faceURL({ s, r })}&quot;)"></span>`;
   return `<h2>Cómo se juega</h2><div class="rules">
     <p>Gana quien termine con <b>menos puntos</b>. Cada uno tiene 4 cartas boca abajo y al repartir ve un momento las <b>dos de abajo</b>. ¡Hay que acordarse!</p>
     <h3>En tu turno</h3>
-    <ul><li><b>Roba del mazo</b>: cámbiala por una de tus cartas (la tuya va al descarte) o tírala.</li>
-    <li><b>Coge la del descarte</b> y cámbiala por una tuya.</li>
-    <li>O canta <b>¡Capo!</b> si crees que tienes menos que nadie: los demás juegan un turno más y se destapan las cartas.</li></ul>
+    <ul><li><b>Roba del mazo</b>: cámbiala por una de tus cartas (la tuya va al descarte) o tírala. Del descarte no se coge nunca.</li>
+    <li>O canta <b>¡Capo!</b> si crees que tienes menos que nadie: los demás juegan una vuelta más y se destapan las cartas.</li></ul>
     <h3>Cartas especiales (al tirarlas recién robadas)</h3>
     <p>${m('c', 7)} El <b>7 vale −1</b>.</p>
     <p>${m('o', 10)} <b>Sota</b>: mira una carta tuya.</p>
@@ -1210,14 +1266,14 @@ function rulesHTML() {
     <p>Cuando cae una carta al descarte, si tienes una del mismo número <b>arrástrala al descarte</b> y te la quitas. Solo vale el más rápido. Si te equivocas, vuelve a su sitio y robas una de castigo.</p>
     <h3>Mover tus cartas</h3>
     <p>Arrastra una carta tuya encima de otra para cambiarlas de sitio. Los demás lo ven… y tú también te puedes liar.</p>
-    <h3>Puntos</h3>
-    <p>Al final de la ronda cada uno suma sus cartas. Si quien cantó Capo tiene lo mínimo, se apunta ${S.V ? (S.V.settings.caboZero ? '0' : 'sus puntos') : '0'}; si no, sus puntos más el castigo. Pierde la partida quien llega al límite y gana quien tenga menos.</p>
+    <h3>Quién gana</h3>
+    <p>Al destapar, quien menos sume gana la ronda y se apunta 1. Se juegan las rondas que queráis; cuando os canséis, quien creó la partida la termina y gana quien más rondas haya ganado.</p>
   </div>`;
 }
 
 // ---------- Jugadores de prueba (solo en local) ----------
 // Juegan al azar desde esta misma página, para poder probar sin amigos conectados.
-const BOT_PEOPLE = [['Lucía', '🦊', '#e8543f'], ['Pablo', '🐼', '#3f8fe8'], ['Marta', '🦄', '#a05de8'], ['Dani', '🤖', '#39c6c6'], ['Sara', '🐯', '#f08a2e']];
+const BOT_PEOPLE = [['Lucía', '🦊', '#e8543f'], ['Pablo', '🐼', '#3f8fe8'], ['Marta', '🦄', '#a05de8'], ['Dani', '🤖', '#39c6c6'], ['Sara', '🐯', '#f08a2e'], ['Leo', '🐸', '#3fbf6f'], ['Nora', '🐙', '#e85fa8']];
 S.bots = [];
 function addBot() {
   const used = new Set(S.msg.lobby.map(p => p.name));
@@ -1229,18 +1285,19 @@ function addBot() {
   const bsend = m => { if (ws.readyState === 1) ws.send(JSON.stringify(m)); };
   const pick = a => a[Math.floor(Math.random() * a.length)];
   let v = null, wait = 0;
-  ws.onmessage = e => { const m = JSON.parse(e.data); if (m.type === 'state') { v = m.view; wait = 2; } };
+  ws.onmessage = e => { const m = JSON.parse(e.data); if (m.type === 'state') { v = m.view; wait = 1 + Math.floor(Math.random() * 2); } };
   const timer = setInterval(() => {
     if (ws.readyState > 1) return clearInterval(timer);
     if (!v || v.phase !== 'play' || wait-- > 0) return;
     const mine = v.players[v.me].hand.map((h, k) => (h ? k : -1)).filter(k => k >= 0);
     if (v.matchRank !== null && v.caboBy !== v.me && mine.length && Math.random() < 0.04) return bsend({ a: 'match', slot: pick(mine) });
     if (v.turn !== v.me) return;
-    if (v.step === 'draw') return bsend(v.caboBy === null && Math.random() < 0.06 ? { a: 'cabo' } : Math.random() < 0.25 && v.discard.length && mine.length ? { a: 'take' } : { a: 'draw' });
-    if (v.step === 'hold') return bsend(v.held.from === 'discard' || Math.random() < 0.5 ? { a: 'swap', slot: pick(mine) } : { a: 'discard' });
+    if (v.step === 'draw') return bsend(v.caboBy === null && Math.random() < 0.06 ? { a: 'cabo' } : { a: 'draw' });
+    if (v.step === 'hold') return bsend(Math.random() < 0.5 ? { a: 'swap', slot: pick(mine) } : { a: 'discard' });
     if (v.step === 'power') {
       const t = v.power.type;
       const others = v.players.map((p, k) => k).filter(k => k !== v.me && k !== v.caboBy && v.players[k].hand.some(Boolean));
+      if (t === 10 && v.power.stage === 'seeing') return bsend({ a: 'done' });
       if (t === 10 && mine.length) return bsend({ a: 'p10', slot: pick(mine) });
       if (v.power.stage === 'decide') return bsend({ a: 'p12swap', yes: Math.random() < 0.5 });
       if (mine.length && others.length) {
@@ -1249,7 +1306,7 @@ function addBot() {
       }
       return bsend({ a: 'skip' });
     }
-  }, 800);
+  }, 1100);
   S.bots.push(ws);
 }
 
@@ -1289,10 +1346,11 @@ const actions = {
   addBot: () => addBot(),
   start: () => { closeSheet(); S.sheet = null; send({ a: 'start' }); },
   draw: () => send({ a: 'draw' }),
-  take: () => send({ a: 'take' }),
   cabo: () => send({ a: 'cabo' }),
   discard: () => send({ a: 'discard' }),
   skip: () => send({ a: 'skip' }),
+  done: () => { hideBig(); send({ a: 'done' }); },
+  finish: () => { closeSheet(); S.sheet = null; send({ a: 'finish' }); },
   p12yes: () => send({ a: 'p12swap', yes: true }),
   p12no: () => send({ a: 'p12swap', yes: false }),
   forceSkip: () => send({ a: 'forceSkip' }),

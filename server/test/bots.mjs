@@ -23,11 +23,12 @@ function run(i) {
     if (v.phase !== 'play') return;
     if (v.matchRank !== null && v.caboBy !== v.me && mine.length && Math.random() < 0.05) return send({ a: 'match', slot: pick(mine) });
     if (v.turn !== v.me) return;
-    if (v.step === 'draw') return send(v.caboBy === null && Math.random() < 0.06 ? { a: 'cabo' } : Math.random() < 0.25 && v.discard.length && mine.length ? { a: 'take' } : { a: 'draw' });
-    if (v.step === 'hold') return send(v.held.from === 'discard' || Math.random() < 0.5 ? { a: 'swap', slot: pick(mine) } : { a: 'discard' });
+    if (v.step === 'draw') return send(v.caboBy === null && Math.random() < 0.06 ? { a: 'cabo' } : { a: 'draw' });
+    if (v.step === 'hold') return send(Math.random() < 0.5 ? { a: 'swap', slot: pick(mine) } : { a: 'discard' });
     if (v.step === 'power') {
       const t = v.power.type;
       const others = v.players.map((p, k) => k).filter(k => k !== v.me && k !== v.caboBy && v.players[k].hand.some(Boolean));
+      if (t === 10 && v.power.stage === 'seeing') return send({ a: 'done' });
       if (t === 10 && mine.length) return send({ a: 'p10', slot: pick(mine) });
       if (v.power.stage === 'decide') return send({ a: 'p12swap', yes: Math.random() < 0.5 });
       if (mine.length && others.length) {

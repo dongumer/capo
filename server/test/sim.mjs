@@ -1,6 +1,6 @@
 // Juega muchas partidas con jugadores al azar y comprueba que las reglas no se rompen.
 import assert from 'node:assert/strict';
-import { newGame, startRound, beginPlay, act, viewFor, eventFor, value, handTotal } from '../src/engine.js';
+import { newGame, startRound, beginPlay, finishGame, act, viewFor, eventFor, value, handTotal } from '../src/engine.js';
 
 const pick = arr => arr[Math.floor(Math.random() * arr.length)];
 const slots = p => p.hand.map((c, i) => (c ? i : -1)).filter(i => i >= 0);
@@ -30,7 +30,7 @@ function checkPrivacy(st, events) {
 
 let games = 0, rounds = 0, actions = 0, matchesOk = 0, matchesBad = 0, cabos = 0;
 for (let g = 0; g < 400; g++) {
-  const n = 2 + (g % 5);
+  const n = 2 + (g % 7);
   const st = newGame(Array.from({ length: n }, (_, i) => ({ id: 'p' + i, name: 'J' + i })));
   let startEvents = startRound(st);
   // Al repartir, cada uno ve sus dos cartas de abajo y nadie más
@@ -40,7 +40,13 @@ for (let g = 0; g < 400; g++) {
   }
   let guard = 0;
   while (st.phase !== 'gameEnd' && guard++ < 200000) {
-    if (st.phase === 'roundEnd') { rounds++; startEvents = startRound(st); continue; }
+    if (st.phase === 'roundEnd') {
+      rounds++;
+      const R = st.results, best = Math.min(...R.sums);
+      R.sums.forEach((v, i) => assert.equal(R.add[i], v === best ? 1 : 0));
+      if (st.round >= 3) { finishGame(st); break; }
+      startEvents = startRound(st); continue;
+    }
     let res;
     if (st.phase === 'peek') {
       const ev = startEvents.splice(0);
@@ -69,17 +75,17 @@ for (let g = 0; g < 400; g++) {
       }
       if (st.step === 'draw') {
         if (st.caboBy === null && (handTotal(p) < 12 || Math.random() < 0.03) && Math.random() < 0.5) { res = act(st, i, { a: 'cabo' }); cabos++; }
-        else if (st.discard.length && slots(p).length && Math.random() < 0.3) res = act(st, i, { a: 'take' });
         else res = act(st, i, { a: 'draw' });
       } else if (st.step === 'hold') {
         const s = slots(p);
-        if (st.held.from === 'discard' || (s.length && Math.random() < 0.5)) res = act(st, i, { a: 'swap', slot: pick(s) });
+        if (s.length && Math.random() < 0.5) res = act(st, i, { a: 'swap', slot: pick(s) });
         else res = act(st, i, { a: 'discard' });
       } else if (st.step === 'power') {
         const pw = st.power;
         const others = st.players.map((q, k) => k).filter(k => k !== i && k !== st.caboBy && slots(st.players[k]).length);
         const s = slots(p);
-        if (pw.type === 10 && s.length) res = act(st, i, { a: 'p10', slot: pick(s) });
+        if (pw.type === 10 && pw.stage === 'seeing') { assert.equal(st.turn, i); res = act(st, i, { a: 'done' }); }
+        else if (pw.type === 10 && s.length) res = act(st, i, { a: 'p10', slot: pick(s) });
         else if ((pw.type === 11 || pw.type === 12) && pw.stage === 'pick' && s.length && others.length) {
           const tp = pick(others);
           res = act(st, i, { a: 'p' + pw.type, slot: pick(s), tp, tslot: pick(slots(st.players[tp])) });
@@ -93,7 +99,7 @@ for (let g = 0; g < 400; g++) {
     if (st.phase === 'play' || st.phase === 'peek') assert.equal(countCards(st), 40);
   }
   assert.equal(st.phase, 'gameEnd', 'partida sin terminar');
-  assert.ok(st.players.some(p => p.total >= st.settings.limit));
+  assert.ok(st.winner.every(w => st.players[w].total === Math.max(...st.players.map(p => p.total))));
   games++;
 }
 
@@ -132,8 +138,9 @@ for (let g = 0; g < 400; g++) {
   assert.equal(st.turn, 2);
   act(st, 2, { a: 'draw' }); act(st, 2, { a: 'discard' });
   assert.ok(st.phase === 'roundEnd' || st.phase === 'gameEnd');
-  assert.equal(st.results.caboOk, true);
-  assert.equal(st.results.add[0], 0);
+  assert.deepEqual(st.results.winners, [0]); // tenía -1
+  assert.equal(st.players[0].total, 1);
+  assert.equal(act(st, 0, { a: 'take' }).ok, false); // ya no se coge del descarte
   // 12: mirar y cambiar
   const s2 = newGame([{ id: 'a' }, { id: 'b' }]);
   startRound(s2); s2.phase = 'play'; s2.turn = 0;

@@ -48,7 +48,7 @@ let steps = 0;
 while (steps++ < 6000) {
   const v = bots[0].last.view;
   if (v.phase === 'gameEnd') break;
-  if (v.phase === 'roundEnd') { bots[1].send({ a: 'nextRound' }); await sleep(60); continue; }
+  if (v.phase === 'roundEnd') { if (v.round >= 3) bots[0].send({ a: 'finish' }); else bots[1].send({ a: 'nextRound' }); await sleep(150); continue; }
   if (v.phase === 'peek') { await sleep(200); continue; } // el servidor empieza solo tras enseñar las cartas
   // Privacidad: nadie ve cartas ajenas ni la carta robada de otro
   for (const b of bots) {
@@ -70,7 +70,8 @@ while (steps++ < 6000) {
   } else if (w.step === 'power') {
     const t = w.power.type;
     const others = w.players.map((p, i) => i).filter(i => i !== w.me && i !== w.caboBy && w.players[i].hand.some(Boolean));
-    if (t === 10 && mine.length) cur.send({ a: 'p10', slot: pick(mine) });
+    if (t === 10 && w.power.stage === 'seeing') { if (Math.random() < 0.3) cur.send({ a: 'done' }); } // si no, lo cierra el servidor
+    else if (t === 10 && mine.length) cur.send({ a: 'p10', slot: pick(mine) });
     else if (w.power.stage === 'decide') cur.send({ a: 'p12swap', yes: Math.random() < 0.5 });
     else if (mine.length && others.length) {
       const tp = pick(others);

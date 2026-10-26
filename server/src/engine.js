@@ -7,11 +7,14 @@
 // - Cuando cae una carta al descarte, el primero que eche una del mismo número se la quita.
 //   Si se equivoca, la carta vuelve a su sitio y roba una de castigo.
 // - Al repartir, cada uno ve un momento sus dos cartas de abajo (huecos 1 y 3).
+// - En tu turno robas del mazo (no se puede coger del descarte) o cantas «¡Capo!».
+// - Tras cantar Capo los demás juegan una vuelta más. Quien menos sume gana la ronda: +1.
+//   Se juega hasta que queráis; gana quien más rondas haya ganado.
 
 export const SUITS = ['o', 'c', 'e', 'b']; // oros, copas, espadas, bastos
 export const RANKS = [1, 2, 3, 4, 5, 6, 7, 10, 11, 12];
-export const MAX_PLAYERS = 6;
-export const DEFAULTS = { limit: 100, caboPenalty: 10, caboZero: true };
+export const MAX_PLAYERS = 8;
+export const DEFAULTS = {};
 
 export const value = c => (c.r === 7 ? -1 : c.r);
 export const powerOf = c => (c.r >= 10 ? c.r : 0);
@@ -125,27 +128,24 @@ export function handTotal(p) {
 
 function endRound(st, events) {
   const sums = st.players.map(handTotal);
-  const add = sums.slice();
-  let caboOk = null;
-  if (st.caboBy !== null) {
-    const mine = sums[st.caboBy];
-    const others = sums.filter((_, i) => i !== st.caboBy);
-    caboOk = others.every(s => mine <= s);
-    add[st.caboBy] = caboOk ? (st.settings.caboZero ? 0 : mine) : mine + st.settings.caboPenalty;
-  }
+  const best = Math.min(...sums);
+  const winners = sums.map((v, i) => (v === best ? i : -1)).filter(i => i >= 0);
+  const add = sums.map((v, i) => (winners.includes(i) ? 1 : 0));
   st.players.forEach((p, i) => { p.total += add[i]; });
-  st.results = { sums, add, caboBy: st.caboBy, caboOk };
+  st.results = { sums, winners, add, caboBy: st.caboBy };
   st.matchRank = null;
   st.held = null; st.power = null;
-  const over = st.players.some(p => p.total >= st.settings.limit);
-  if (over) {
-    const best = Math.min(...st.players.map(p => p.total));
-    st.winner = st.players.map((p, i) => (p.total === best ? i : -1)).filter(i => i >= 0);
-    st.phase = 'gameEnd';
-  } else {
-    st.phase = 'roundEnd';
-  }
-  events.push({ t: 'roundEnd', results: st.results, hands: st.players.map(p => p.hand), totals: st.players.map(p => p.total), over });
+  st.phase = 'roundEnd';
+  events.push({ t: 'roundEnd', results: st.results, hands: st.players.map(p => p.hand), totals: st.players.map(p => p.total) });
+}
+
+// Se acaba la partida cuando lo decidís: gana quien más rondas haya ganado.
+export function finishGame(st) {
+  const best = Math.max(...st.players.map(p => p.total));
+  st.winner = st.players.map((p, i) => (p.total === best ? i : -1)).filter(i => i >= 0);
+  st.phase = 'gameEnd';
+  st.held = null; st.power = null; st.matchRank = null;
+  return [{ t: 'gameEnd', winner: st.winner }];
 }
 
 const validSlot = (p, s) => Number.isInteger(s) && s >= 0 && s < p.hand.length && p.hand[s] !== null;
@@ -158,7 +158,7 @@ export function act(st, pi, a) {
   const myTurn = st.turn === pi && st.phase === 'play';
 
   switch (a.a) {
-    // --- Turno: robar, coger del descarte o cantar Capo ---
+    // --- Turno: robar del mazo o cantar Capo ---
     case 'draw': {
       if (!myTurn || st.step !== 'draw') return err('Ahora no puedes robar');
       const c = drawFromDeck(st, events);
@@ -166,17 +166,6 @@ export function act(st, pi, a) {
       st.held = { card: c, from: 'deck' };
       st.step = 'hold';
       events.push({ t: 'draw', p: pi, priv: { to: pi, card: c } });
-      return okEv(events);
-    }
-    case 'take': {
-      if (!myTurn || st.step !== 'draw') return err('Ahora no puedes coger del descarte');
-      if (!st.discard.length) return err('El descarte está vacío');
-      if (!p.hand.some(Boolean)) return err('No tienes cartas por las que cambiarla');
-      const c = st.discard.pop();
-      st.held = { card: c, from: 'discard' };
-      st.step = 'hold';
-      st.matchRank = null;
-      events.push({ t: 'take', p: pi, card: c });
       return okEv(events);
     }
     case 'cabo': {
@@ -234,7 +223,13 @@ export function act(st, pi, a) {
     case 'p10': {
       if (!myTurn || st.step !== 'power' || st.power.type !== 10) return err('No puedes mirar ahora');
       if (!validSlot(p, a.slot)) return err('Elige una de tus cartas');
+      // El turno no pasa hasta que termina de mirarla (lo cierra él o el servidor a los pocos segundos)
+      st.power = { type: 10, stage: 'seeing', own: a.slot, tp: null, tslot: null };
       events.push({ t: 'peek', p: pi, slot: a.slot, priv: { to: pi, card: p.hand[a.slot] } });
+      return okEv(events);
+    }
+    case 'done': {
+      if (!myTurn || st.step !== 'power' || st.power.stage !== 'seeing') return err('No estás mirando ninguna carta');
       endTurn(st, events);
       return okEv(events);
     }

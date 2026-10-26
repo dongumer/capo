@@ -1,7 +1,7 @@
 // Servidor del Capo en Cloudflare: una "sala" (Durable Object) por código de partida.
 // La sala guarda el estado, reparte, comprueba las jugadas y manda a cada uno solo lo que puede ver.
 import { DurableObject } from 'cloudflare:workers';
-import { newGame, startRound, beginPlay, act, viewFor, eventFor, MAX_PLAYERS, DEFAULTS } from './engine.js';
+import { newGame, startRound, beginPlay, finishGame, act, viewFor, eventFor, MAX_PLAYERS, DEFAULTS } from './engine.js';
 
 const ALLOWED = [
   /^https:\/\/dongumer\.github\.io$/,
@@ -10,7 +10,9 @@ const ALLOWED = [
 ];
 const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; // sin I ni O para no confundir
 const ROOM_TTL = 1000 * 60 * 60 * 24; // una sala sin movimiento se borra a las 24 h
-const PEEK_MS = 2200; // tiempo que se ven las dos cartas de abajo al repartir
+const COUNTDOWN_MS = 3000; // cuenta atrás antes de enseñar las dos cartas de abajo
+const SHOW_MS = 3000; // lo que se ven en grande
+const LOOK_MS = 3500; // lo que tiene quien usa la sota para mirar su carta antes de pasar el turno
 
 const okOrigin = o => !o || ALLOWED.some(r => r.test(o));
 const cors = o => ({ 'Access-Control-Allow-Origin': o || '*', 'Content-Type': 'application/json' });
@@ -57,27 +59,42 @@ export class Room extends DurableObject {
     });
   }
 
-  async save() {
-    this.s.touched = Date.now();
-    await this.ctx.storage.put('s', this.s);
-    // La alarma sirve para dos cosas: empezar a jugar tras el vistazo inicial y borrar salas viejas.
+  // Temporizadores de la partida: empezar tras el vistazo inicial o pasar el turno tras mirar con la sota.
+  timerAt() {
     const g = this.s.game;
-    await this.ctx.storage.setAlarm(g && g.phase === 'peek' && this.s.peekAt ? this.s.peekAt : Date.now() + ROOM_TTL);
+    if (!g) return null;
+    if (g.phase === 'peek' && this.s.peekAt) return this.s.peekAt;
+    if (g.phase === 'play' && g.step === 'power' && g.power.stage === 'seeing') return this.s.lookAt || null;
+    return null;
   }
 
-  // Al repartir, se dejan unos segundos para la animación y para ver las dos cartas de abajo.
+  async save() {
+    this.s.touched = Date.now();
+    const g = this.s.game;
+    if (g && g.phase === 'play' && g.step === 'power' && g.power.stage === 'seeing') this.s.lookAt = this.s.lookAt || Date.now() + LOOK_MS;
+    else this.s.lookAt = null;
+    await this.ctx.storage.put('s', this.s);
+    // La alarma sirve también para borrar salas viejas.
+    await this.ctx.storage.setAlarm(this.timerAt() || Date.now() + ROOM_TTL);
+  }
+
+  // Al repartir: animación, cuenta atrás y las dos cartas de abajo en grande. Luego empieza solo.
   async deal() {
     const ev = startRound(this.s.game);
-    this.s.peekAt = Date.now() + 1300 + 280 * this.s.game.players.length + PEEK_MS;
+    const dealMs = 1300 + 280 * this.s.game.players.length;
+    ev[0].showIn = dealMs + COUNTDOWN_MS;
+    ev[0].showMs = SHOW_MS;
+    this.s.peekAt = Date.now() + dealMs + COUNTDOWN_MS + SHOW_MS + 400;
     await this.save();
     this.broadcast(ev);
   }
 
   async alarm() {
     const g = this.s && this.s.game;
-    if (g && g.phase === 'peek' && this.s.peekAt) {
-      if (Date.now() < this.s.peekAt - 50) { await this.ctx.storage.setAlarm(this.s.peekAt); return; }
-      const ev = beginPlay(g);
+    const at = this.s && this.timerAt();
+    if (at) {
+      if (Date.now() < at - 50) { await this.ctx.storage.setAlarm(at); return; }
+      const ev = g.phase === 'peek' ? beginPlay(g) : act(g, g.turn, { a: 'done' }).events;
       this.s.peekAt = null;
       await this.save();
       this.broadcast(ev);
@@ -174,13 +191,15 @@ export class Room extends DurableObject {
       case 'react':
         this.broadcast([{ t: 'react', pid, e: clean(m.e, 8) }]);
         return;
-      case 'settings':
-        if (!isHost || this.s.game) return;
-        for (const k of ['limit', 'caboPenalty']) if (Number.isFinite(+m.settings?.[k])) this.s.settings[k] = Math.max(0, Math.min(500, Math.round(+m.settings[k])));
-        if (typeof m.settings?.caboZero === 'boolean') this.s.settings.caboZero = m.settings.caboZero;
+      case 'finish': {
+        if (!isHost) return reply('Solo quien creó la partida puede terminarla');
+        const g = this.s.game;
+        if (!g || g.phase === 'gameEnd') return;
+        const ev = finishGame(g);
         await this.save();
-        this.broadcast([]);
+        this.broadcast(ev);
         return;
+      }
       case 'kick':
         if (!isHost || this.s.game || m.pid === pid) return;
         this.s.lobby = this.s.lobby.filter(p => p.id !== m.pid);
