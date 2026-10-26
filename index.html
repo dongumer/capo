@@ -51,6 +51,12 @@
 }
 
 * { box-sizing: border-box; }
+/* Márgenes seguros (muesca, barra de inicio). Si la partida se dibuja girada, se giran también. */
+body { --gw: 100vw; --gh: 100vh; --sa-t: env(safe-area-inset-top); --sa-r: env(safe-area-inset-right); --sa-b: env(safe-area-inset-bottom); --sa-l: env(safe-area-inset-left); }
+body.rot { --sa-t: env(safe-area-inset-right); --sa-r: env(safe-area-inset-bottom); --sa-b: env(safe-area-inset-left); --sa-l: env(safe-area-inset-top); }
+#root { position: fixed; left: 0; top: 0; width: 100%; height: 100%; overflow: hidden; }
+/* Móvil en vertical durante la partida: se dibuja todo girado 90° para jugar en horizontal sin activar el giro */
+body.rot #root { transform-origin: 0 0; transform: rotate(90deg) translateY(-100%); }
 [hidden] { display: none !important; }
 html { height: 100%; -webkit-tap-highlight-color: transparent; -webkit-text-size-adjust: 100%; overscroll-behavior: none; }
 body {
@@ -64,7 +70,7 @@ input { font: inherit; font-size: 16px; }
 
 /* ---------- Pantallas de menú ---------- */
 .screen { position: fixed; inset: 0; overflow-y: auto; overscroll-behavior: contain;
-  padding: calc(18px + env(safe-area-inset-top)) calc(18px + env(safe-area-inset-right)) calc(22px + env(safe-area-inset-bottom)) calc(18px + env(safe-area-inset-left)); }
+  padding: calc(18px + var(--sa-t)) calc(18px + var(--sa-r)) calc(22px + var(--sa-b)) calc(18px + var(--sa-l)); }
 .wrap { max-width: 460px; margin: 0 auto; min-height: 100%; display: flex; flex-direction: column; gap: 18px; }
 .logo { display: flex; align-items: center; gap: 14px; margin-top: 8px; }
 .logo-cards { position: relative; width: 64px; height: 64px; flex: none; }
@@ -112,6 +118,43 @@ h2 { margin: 0; font-family: var(--display); font-weight: 800; font-size: 24px; 
 .set .seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
 .wait { text-align: center; color: var(--muted); font-weight: 700; }
 .foot { margin-top: auto; display: flex; flex-direction: column; gap: 12px; }
+.colA, .colB { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.colB { flex: 1; }
+/* Menú con el móvil en horizontal: dos columnas y todo más compacto, sin tener que bajar */
+@media (orientation: landscape) and (max-height: 560px) {
+  .screen { padding-top: calc(10px + var(--sa-t)); padding-bottom: calc(10px + var(--sa-b)); }
+  .wrap { max-width: 920px; flex-direction: row; gap: 16px; }
+  .colA, .colB { flex: 1; gap: 10px; min-height: 0; }
+  .logo { margin-top: 0; gap: 10px; }
+  .logo-cards { width: 46px; height: 46px; }
+  .logo-cards i { width: 28px; height: 40px; top: 4px; left: 9px; }
+  h1 { font-size: 34px; }
+  h2 { font-size: 20px; }
+  .tag { font-size: 13px; }
+  .card-box { padding: 10px 12px; gap: 7px; border-radius: 16px; }
+  .label { font-size: 11px; }
+  .field { height: 42px; }
+  .avatars button { font-size: 18px; border-radius: 9px; }
+  .colors button { width: 26px; height: 26px; }
+  .btn { min-height: 46px; font-size: 16px; padding: 8px 14px; border-radius: 13px; }
+  .btn--small { min-height: 38px; font-size: 14px; }
+  .foot { gap: 8px; }
+  .link { padding: 4px; font-size: 14px; }
+  .invite { padding: 6px 10px; font-size: 14px; }
+  .code span { width: 42px; height: 50px; font-size: 28px; border-radius: 10px; }
+  #setBox { display: none; }
+  .wrap { height: 100%; min-height: 0; }
+  .colB { overflow: hidden; }
+  .players-box { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+  .players { overflow-y: auto; min-height: 0; flex: 1; gap: 5px; display: grid; grid-template-columns: 1fr 1fr; align-content: start; }
+  .players .st { font-size: 11px; }
+  .players .x { width: 28px; height: 28px; font-size: 14px; }
+  .players li { padding: 4px 8px; gap: 8px; }
+  .players .av { width: 32px; height: 32px; font-size: 18px; border-width: 2px; }
+  .players .nm { font-size: 15px; line-height: 1.15; }
+  .join-row .field { font-size: 20px; }
+  .wait { font-size: 14px; margin: 0; }
+}
 
 /* ---------- Mesa 3D ---------- */
 #game { position: fixed; inset: 0; overflow: hidden; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
@@ -163,18 +206,18 @@ h2 { margin: 0; font-family: var(--display); font-weight: 800; font-size: 24px; 
 
 /* HUD plano encima de la mesa */
 .hud { position: absolute; z-index: 5; }
-#status { left: 50%; top: calc(8px + env(safe-area-inset-top)); transform: translateX(-50%); max-width: min(560px, 70vw); text-align: center; background: rgba(8,14,11,.78); border: 1px solid rgba(255,255,255,.1); border-radius: 16px; padding: 7px 16px; font-weight: 700; font-size: 15px; line-height: 1.25; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+#status { left: 50%; top: calc(8px + var(--sa-t)); transform: translateX(-50%); max-width: min(560px, calc(var(--gw) * 0.7)); text-align: center; background: rgba(8,14,11,.78); border: 1px solid rgba(255,255,255,.1); border-radius: 16px; padding: 7px 16px; font-weight: 700; font-size: 15px; line-height: 1.25; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
 #status.mine { background: rgba(226,172,47,.95); color: #241800; border-color: transparent; }
-#topL { left: calc(10px + env(safe-area-inset-left)); top: calc(8px + env(safe-area-inset-top)); display: flex; gap: 8px; }
-#topR { right: calc(10px + env(safe-area-inset-right)); top: calc(8px + env(safe-area-inset-top)); display: flex; gap: 8px; }
+#topL { left: calc(10px + var(--sa-l)); top: calc(8px + var(--sa-t)); display: flex; gap: 8px; }
+#topR { right: calc(10px + var(--sa-r)); top: calc(8px + var(--sa-t)); display: flex; gap: 8px; }
 .ibtn { width: 44px; height: 44px; border-radius: 14px; background: rgba(8,14,11,.72); border: 1px solid rgba(255,255,255,.12); display: grid; place-items: center; font-size: 20px; color: #f5f0e1; }
-#actions { right: calc(12px + env(safe-area-inset-right)); bottom: calc(10px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 8px; align-items: stretch; width: 168px; }
+#actions { right: calc(12px + var(--sa-r)); bottom: calc(10px + var(--sa-b)); display: flex; flex-direction: column; gap: 8px; align-items: stretch; width: 168px; }
 .abtn { min-height: 50px; border-radius: 15px; padding: 8px 12px; font: 800 17px var(--display); background: #f5ecd3; color: #1d2a24; box-shadow: 0 4px 0 #a99a72, 0 8px 18px rgba(0,0,0,.4); transition: transform 90ms, box-shadow 90ms; }
 .abtn:active { transform: translateY(4px); box-shadow: 0 0 0 #a99a72; }
 .abtn.go { background: var(--gold); box-shadow: 0 4px 0 #9b7414, 0 8px 18px rgba(0,0,0,.4); }
 .abtn.cabo { background: #e8543f; color: #fff; box-shadow: 0 4px 0 #8f2618, 0 8px 18px rgba(0,0,0,.4); font-size: 20px; letter-spacing: .02em; }
 .abtn.ghost { background: rgba(8,14,11,.75); color: #f5f0e1; box-shadow: none; border: 1px solid rgba(255,255,255,.2); }
-#mePlate { left: calc(10px + env(safe-area-inset-left)); bottom: calc(10px + env(safe-area-inset-bottom)); display: flex; align-items: center; gap: 8px; }
+#mePlate { left: calc(10px + var(--sa-l)); bottom: calc(10px + var(--sa-b)); display: flex; align-items: center; gap: 8px; }
 #mePlate .who { background: rgba(8,14,11,.75); border-radius: 14px; padding: 5px 12px 5px 5px; display: flex; align-items: center; gap: 8px; font-weight: 800; }
 #mePlate .who i { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-size: 22px; background: #f5ecd3; border: 3px solid; }
 #mePlate .who small { display: block; font-weight: 600; color: #cbbf9c; font-size: 12px; line-height: 1; }
@@ -184,24 +227,24 @@ h2 { margin: 0; font-family: var(--display); font-weight: 800; font-size: 24px; 
 @keyframes rise { 0% { transform: translate(-50%, 0) scale(.4); opacity: 0; } 15% { transform: translate(-50%, -20px) scale(1.15); opacity: 1; } 100% { transform: translate(-50%, -120px) scale(1); opacity: 0; } }
 
 #banner { position: absolute; z-index: 20; left: 50%; top: 42%; transform: translate(-50%, -50%); pointer-events: none; text-align: center; }
-#banner b { display: block; font: 800 clamp(48px, 12vw, 110px)/1 var(--display); color: #fff3cf; text-shadow: 0 6px 0 #a33a26, 0 12px 30px rgba(0,0,0,.6); letter-spacing: -.01em; }
+#banner b { display: block; font: 800 clamp(48px, calc(var(--gw) * 0.12), 110px)/1 var(--display); color: #fff3cf; text-shadow: 0 6px 0 #a33a26, 0 12px 30px rgba(0,0,0,.6); letter-spacing: -.01em; }
 #banner span { display: inline-block; margin-top: 8px; background: rgba(8,14,11,.8); padding: 6px 16px; border-radius: 12px; font-weight: 800; }
 #banner.show { animation: bannerIn 1.9s cubic-bezier(.2,.9,.3,1.3) forwards; }
 @keyframes bannerIn { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.5); } 15% { opacity: 1; transform: translate(-50%, -50%) scale(1.06); } 25% { transform: translate(-50%, -50%) scale(1); } 80% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -50%) scale(1); } }
 
 #big { position: absolute; z-index: 4; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; pointer-events: none; background: radial-gradient(closest-side, rgba(4,8,6,.72), rgba(4,8,6,.35)); animation: fadeIn .25s ease-out; }
 #big .cap { font: 800 20px var(--display); background: rgba(8,14,11,.85); padding: 6px 16px; border-radius: 12px; }
-#big .cards { display: flex; gap: min(4vw, 28px); }
+#big .cards { display: flex; gap: min(calc(var(--gw) * 0.04), 28px); }
 #big figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; }
-#big .bc { height: min(56vh, 330px); aspect-ratio: 140 / 200; border-radius: 14px; background-size: cover; box-shadow: 0 18px 40px rgba(0,0,0,.6); animation: bigIn .45s cubic-bezier(.2,.9,.3,1.2) both; }
+#big .bc { height: min(calc(var(--gh) * 0.56), 330px); aspect-ratio: 140 / 200; border-radius: 14px; background-size: cover; box-shadow: 0 18px 40px rgba(0,0,0,.6); animation: bigIn .45s cubic-bezier(.2,.9,.3,1.2) both; }
 #big figure:nth-child(2) .bc { animation-delay: .08s; }
 #big figcaption { font-weight: 800; font-size: 15px; color: #e8dcb8; }
-#big .bar { width: min(260px, 50vw); height: 6px; border-radius: 3px; background: rgba(255,255,255,.2); overflow: hidden; }
+#big .bar { width: min(260px, calc(var(--gw) * 0.5)); height: 6px; border-radius: 3px; background: rgba(255,255,255,.2); overflow: hidden; }
 #big .bar i { display: block; height: 100%; background: var(--gold); transform-origin: left; animation: shrink linear forwards; }
 @keyframes bigIn { from { transform: translateY(30px) rotateY(90deg) scale(.8); opacity: 0; } }
 @keyframes fadeIn { from { opacity: 0; } }
 @keyframes shrink { to { transform: scaleX(0); } }
-#readyBox { position: absolute; z-index: 6; left: 50%; top: 52%; transform: translate(-50%, -50%); width: min(440px, 86vw); max-height: 80vh; overflow: auto; background: rgba(8,14,11,.9); border: 2px solid var(--gold); border-radius: 22px; padding: 16px; display: flex; flex-direction: column; gap: 10px; align-items: center; text-align: center; box-shadow: 0 20px 50px rgba(0,0,0,.6); animation: fadeIn .3s ease-out; }
+#readyBox { position: absolute; z-index: 6; left: 50%; top: 52%; transform: translate(-50%, -50%); width: min(440px, calc(var(--gw) * 0.86)); max-height: calc(var(--gh) * 0.8); overflow: auto; background: rgba(8,14,11,.9); border: 2px solid var(--gold); border-radius: 22px; padding: 16px; display: flex; flex-direction: column; gap: 10px; align-items: center; text-align: center; box-shadow: 0 20px 50px rgba(0,0,0,.6); animation: fadeIn .3s ease-out; }
 #readyBox b { font: 800 26px var(--display); }
 #readyBox p { margin: 0; font-size: 15px; color: #e8dcb8; }
 #readyBox .chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
@@ -210,20 +253,20 @@ h2 { margin: 0; font-family: var(--display); font-weight: 800; font-size: 24px; 
 #readyBox .abtn { width: 100%; }
 #readyBox .abtn.big { min-height: 60px; font-size: 22px; }
 #count { position: absolute; z-index: 21; left: 50%; top: 46%; transform: translate(-50%, -50%); pointer-events: none; text-align: center; }
-#count b { display: block; font: 800 min(40vh, 190px)/1 var(--display); color: #fff3cf; text-shadow: 0 8px 0 #a33a26, 0 14px 40px rgba(0,0,0,.6); animation: tick .9s ease-out both; }
+#count b { display: block; font: 800 min(calc(var(--gh) * 0.4), 190px)/1 var(--display); color: #fff3cf; text-shadow: 0 8px 0 #a33a26, 0 14px 40px rgba(0,0,0,.6); animation: tick .9s ease-out both; }
 #count span { font-weight: 800; background: rgba(8,14,11,.8); padding: 6px 14px; border-radius: 12px; }
 @keyframes tick { 0% { transform: scale(1.6); opacity: 0; } 20% { transform: scale(1); opacity: 1; } 80% { opacity: 1; } 100% { transform: scale(.85); opacity: 0; } }
 #turnPill { position: absolute; z-index: 19; left: 50%; top: 40%; transform: translate(-50%, -50%); pointer-events: none; display: flex; align-items: center; gap: 10px; background: rgba(8,14,11,.88); border: 2px solid var(--gold); border-radius: 18px; padding: 10px 20px; font: 800 24px var(--display); animation: pill 1.3s ease-out forwards; }
 #turnPill i { font-style: normal; font-size: 34px; }
 @keyframes pill { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.8); } 15% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 75% { opacity: 1; } 100% { opacity: 0; } }
-#toast { position: fixed; z-index: 40; left: 50%; top: calc(60px + env(safe-area-inset-top)); transform: translateX(-50%); background: #1b2420; color: #fff; border-radius: 14px; padding: 9px 16px; font-weight: 700; font-size: 15px; box-shadow: 0 8px 24px rgba(0,0,0,.4); max-width: min(90vw, 480px); text-align: center; transition: opacity .25s, transform .25s; }
+#toast { position: fixed; z-index: 40; left: 50%; top: calc(60px + var(--sa-t)); transform: translateX(-50%); background: #1b2420; color: #fff; border-radius: 14px; padding: 9px 16px; font-weight: 700; font-size: 15px; box-shadow: 0 8px 24px rgba(0,0,0,.4); max-width: min(calc(var(--gw) * 0.9), 480px); text-align: center; transition: opacity .25s, transform .25s; }
 #toast.err { background: #8f2618; }
 #toast:not(.on) { opacity: 0; transform: translate(-50%, -10px); pointer-events: none; }
-#conn { position: fixed; z-index: 41; left: 50%; bottom: calc(14px + env(safe-area-inset-bottom)); transform: translateX(-50%); background: #8f2618; color: #fff; padding: 8px 16px; border-radius: 12px; font-weight: 800; font-size: 15px; }
+#conn { position: fixed; z-index: 41; left: 50%; bottom: calc(14px + var(--sa-b)); transform: translateX(-50%); background: #8f2618; color: #fff; padding: 8px 16px; border-radius: 12px; font-weight: 800; font-size: 15px; }
 
 /* Paneles sobre la mesa */
 .sheet-bg { position: absolute; inset: 0; z-index: 25; background: rgba(4,8,6,.45); display: flex; justify-content: flex-end; }
-.sheet { width: min(430px, 100%); height: 100%; overflow-y: auto; background: #f5ecd3; color: #1d2a24; padding: calc(14px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) 18px; display: flex; flex-direction: column; gap: 12px; box-shadow: -20px 0 40px rgba(0,0,0,.4); animation: slideIn .35s cubic-bezier(.2,.8,.3,1); }
+.sheet { width: min(430px, 100%); height: 100%; overflow-y: auto; background: #f5ecd3; color: #1d2a24; padding: calc(14px + var(--sa-t)) calc(16px + var(--sa-r)) calc(16px + var(--sa-b)) 18px; display: flex; flex-direction: column; gap: 12px; box-shadow: -20px 0 40px rgba(0,0,0,.4); animation: slideIn .35s cubic-bezier(.2,.8,.3,1); }
 @keyframes slideIn { from { transform: translateX(40px); opacity: 0; } }
 .sheet h2 { font-size: 26px; }
 .sheet .btn { min-height: 50px; font-size: 17px; background: #fffaf0; border-color: #d9cfb8; box-shadow: 0 4px 0 #d9cfb8; color: #1d2a24; }
@@ -245,7 +288,6 @@ h2 { margin: 0; font-family: var(--display); font-weight: 800; font-size: 24px; 
 #rotate { position: fixed; inset: 0; z-index: 60; background: #0b1714; color: #f5f0e1; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 18px; text-align: center; padding: 30px; }
 #rotate .ph { width: 70px; height: 120px; border: 5px solid #f5f0e1; border-radius: 16px; animation: rot 2s ease-in-out infinite; }
 @keyframes rot { 0%, 30% { transform: rotate(0); } 60%, 100% { transform: rotate(-90deg); } }
-@media (orientation: portrait) { body.ingame #rotate { display: flex; } }
 
 #dragGhost { position: fixed; z-index: 50; pointer-events: none; border-radius: 8px; background-size: cover; box-shadow: 0 16px 30px rgba(0,0,0,.6); transform: translate(-50%, -50%) rotate(-4deg); }
 
@@ -260,10 +302,12 @@ h2 { margin: 0; font-family: var(--display); font-weight: 800; font-size: 24px; 
 </style>
 </head>
 <body>
+<div id="root">
 
 <!-- Inicio -->
 <section class="screen" id="home" hidden>
   <div class="wrap">
+   <div class="colA">
     <div class="logo">
       <div class="logo-cards"><i></i><i></i></div>
       <div><h1>Capo</h1><p class="tag">Las cartas de siempre, cada uno desde su casa.</p></div>
@@ -276,6 +320,8 @@ h2 { margin: 0; font-family: var(--display); font-weight: 800; font-size: 24px; 
       <div class="avatars" id="avatars"></div>
       <div class="colors" id="colors"></div>
     </div>
+   </div>
+   <div class="colB">
     <div class="foot">
       <button class="btn btn--main" data-act="create">Crear partida</button>
       <button class="btn" data-act="showJoin" id="joinBtn">Unirse a partida</button>
@@ -288,12 +334,14 @@ h2 { margin: 0; font-family: var(--display); font-weight: 800; font-size: 24px; 
       </div>
       <button class="link" data-act="rules">¿Cómo se juega?</button>
     </div>
+   </div>
   </div>
 </section>
 
 <!-- Sala de espera -->
 <section class="screen" id="lobby" hidden>
   <div class="wrap">
+   <div class="colA">
     <div class="row" style="align-items:center">
       <h2 style="flex:1">Sala de espera</h2>
       <button class="btn btn--small" data-act="leave" style="flex:none">Salir</button>
@@ -307,16 +355,19 @@ h2 { margin: 0; font-family: var(--display); font-weight: 800; font-size: 24px; 
         <button class="btn btn--small" data-act="copy">Copiar enlace</button>
       </div>
     </div>
-    <div class="card-box">
+    <div class="card-box" id="setBox"></div>
+   </div>
+   <div class="colB">
+    <div class="card-box players-box">
       <div class="label" id="pCount">Jugadores</div>
       <ul class="players" id="pList"></ul>
     </div>
-    <div class="card-box" id="setBox"></div>
     <div class="foot">
       <button class="btn" data-act="addBot" id="botBtn" hidden>Añadir jugador de prueba 🤖</button>
       <button class="btn btn--main" data-act="start" id="startBtn">Empezar partida</button>
       <p class="wait" id="waitTxt" hidden></p>
     </div>
+   </div>
   </div>
 </section>
 
@@ -336,9 +387,9 @@ h2 { margin: 0; font-family: var(--display); font-weight: 800; font-size: 24px; 
   <div id="sheetHost"></div>
 </section>
 
-<div id="rotate"><div class="ph"></div><b style="font-size:22px">Gira el móvil</b><span>La mesa se ve en horizontal.</span></div>
 <div id="toast"></div>
 <div id="conn" hidden>Reconectando…</div>
+</div>
 
 <script>
 'use strict';
@@ -497,8 +548,26 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 function show(id) {
   for (const s of ['home', 'lobby', 'game']) document.getElementById(s).hidden = s !== id;
   document.body.classList.toggle('ingame', id === 'game');
+  if (id !== 'game') endDrag();
+  applyOrient();
   if (id === 'game') { S.fitKey = null; wake(); }
 }
+// Si el móvil está en vertical durante la partida, se gira el dibujo (ver body.rot en el CSS).
+function rotated() { return document.body.classList.contains('rot'); }
+function applyOrient() {
+  const rot = !document.getElementById('game').hidden && innerHeight > innerWidth;
+  document.body.classList.toggle('rot', rot);
+  const r = $('#root');
+  r.style.width = rot ? innerHeight + 'px' : '';
+  r.style.height = rot ? innerWidth + 'px' : '';
+  // Medidas de la partida tal como se ve, para el CSS (vw/vh no sirven si está girada)
+  document.body.style.setProperty('--gw', (rot ? innerHeight : innerWidth) + 'px');
+  document.body.style.setProperty('--gh', (rot ? innerWidth : innerHeight) + 'px');
+}
+// Tamaño de la partida tal como se ve (apaisado aunque el móvil esté en vertical)
+function gameSize() { return rotated() ? [innerHeight, innerWidth] : [innerWidth, innerHeight]; }
+// Coordenadas de pantalla -> coordenadas dentro de #root
+function toLocal(x, y) { return rotated() ? [y, innerWidth - x] : [x, y]; }
 let wakeLock = null;
 async function wake() { try { if (!wakeLock && navigator.wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); } } catch {} }
 
@@ -891,7 +960,7 @@ function fitPoints(V) {
 }
 function fitTable() {
   if (!S.V || document.getElementById('game').hidden) return;
-  const W = innerWidth, H = innerHeight;
+  const [W, H] = gameSize();
   if (!W || !H) return;
   const top = 48, bottom = 4, side = 8;
   const aw = W - side * 2, ah = H - top - bottom;
@@ -909,12 +978,12 @@ function fitTable() {
   S.fitKey = fitKey();
 }
 const fitKey = () => S.V ? `${S.V.players.length}:${S.V.players[S.V.me].hand.length}:${innerWidth}x${innerHeight}` : '';
-function refitSoon() { S.fitKey = null; fitTable(); for (const ms of [120, 400, 900, 1600]) setTimeout(() => { S.fitKey = null; fitTable(); }, ms); }
+function refitSoon() { applyOrient(); S.fitKey = null; fitTable(); for (const ms of [120, 400, 900, 1600]) setTimeout(() => { applyOrient(); S.fitKey = null; fitTable(); }, ms); }
 addEventListener('resize', refitSoon);
 addEventListener('orientationchange', refitSoon);
 if (window.visualViewport) visualViewport.addEventListener('resize', refitSoon);
 // Por si acaso: si el tamaño cambia sin aviso, se reajusta
-setInterval(() => { if (S.V && S.fitKey !== fitKey()) fitTable(); }, 700);
+setInterval(() => { if (S.V && S.fitKey !== fitKey()) { applyOrient(); fitTable(); } }, 700);
 
 // ---------- Animaciones ----------
 function flyer(card, from, to, { up0 = false, up1 = false, dur = 460, lift = 70 } = {}) {
@@ -938,13 +1007,14 @@ function screenPosOfSeat(V, p) {
   if (p === V.me) { const r = $('#mePlate').getBoundingClientRect(); return { x: r.left + 30, y: r.top }; }
   const el = items.querySelector(`[data-seat="${p}"] .bub`);
   if (!el) return { x: innerWidth / 2, y: innerHeight / 2 };
-  const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top };
+  const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 - 30 };
 }
 function floatEmoji(V, p, e) {
   const pos = screenPosOfSeat(V, p);
   const d = document.createElement('div'); d.className = 'float-emoji'; d.textContent = e;
-  d.style.left = pos.x + 'px'; d.style.top = pos.y - 10 + 'px';
-  document.body.append(d); setTimeout(() => d.remove(), 1900);
+  const [lx, ly] = toLocal(pos.x, pos.y);
+  d.style.left = lx + 'px'; d.style.top = ly - 10 + 'px';
+  $('#root').append(d); setTimeout(() => d.remove(), 1900);
 }
 
 // Antes de la cuenta atrás: todos confirman que están preparados (y con el móvil en horizontal)
@@ -1164,36 +1234,44 @@ async function animate(ev, O, N, fast) {
 
 // ---------- Toques y arrastres en la mesa ----------
 let drag = null;
+// Arrastrar: se guarda solo el número de hueco, porque la carta en pantalla puede redibujarse
+// a mitad del arrastre (cuando otro juega). El dedo se "engancha" a #game, que no cambia nunca,
+// para que el móvil no pierda el final del arrastre y no quede una carta colgada.
 items.addEventListener('pointerdown', e => {
   const c = e.target.closest('.card[data-mine]');
-  if (!c || !S.V) return;
-  const V = S.V;
-  if (V.phase !== 'play') return;
-  drag = { el: c, slot: +c.dataset.slot, x: e.clientX, y: e.clientY, moved: false, id: e.pointerId };
+  if (!c || !S.V || S.V.phase !== 'play') return;
+  endDrag();
+  drag = { slot: +c.dataset.slot, key: c.dataset.key, x: e.clientX, y: e.clientY, moved: false, id: e.pointerId, last: Date.now() };
 });
 addEventListener('pointermove', e => {
   if (!drag || e.pointerId !== drag.id) return;
+  drag.last = Date.now();
   const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
   if (!drag.moved && Math.hypot(dx, dy) < 12) return;
   if (!drag.moved) {
+    const el = elByKey(drag.key);
+    if (!el) return endDrag();
     drag.moved = true;
-    const r = drag.el.getBoundingClientRect();
+    try { $('#game').setPointerCapture(e.pointerId); } catch {}
+    const r = el.getBoundingClientRect();
     const g = document.createElement('div'); g.id = 'dragGhost';
-    const rv = S.reveal[drag.el.dataset.key];
+    const rv = S.reveal[drag.key];
     g.style.backgroundImage = rv ? `url("${faceURL(rv.card)}")` : 'var(--back)';
-    const w = Math.max(56, Math.min(r.width, r.height * .7));
+    const w = Math.max(56, Math.max(r.width, r.height) * .7);
     g.style.width = w + 'px'; g.style.height = w * 1.43 + 'px';
-    document.body.append(g); drag.ghost = g;
-    drag.el.classList.add('dragging');
+    $('#root').append(g); drag.ghost = g;
     sfx.flick();
   }
-  drag.ghost.style.left = e.clientX + 'px'; drag.ghost.style.top = e.clientY + 'px';
+  const el = elByKey(drag.key); if (el) el.classList.add('dragging');
+  const [lx, ly] = toLocal(e.clientX, e.clientY);
+  drag.ghost.style.left = lx + 'px'; drag.ghost.style.top = ly + 'px';
   const t = dropTarget(e.clientX, e.clientY);
   items.querySelectorAll('.droppable').forEach(x => x.classList.remove('droppable'));
   if (t && t.zone) items.querySelector('.zone[data-zone="discard"]').classList.add('droppable');
 });
 function dropTarget(x, y) {
   const zone = items.querySelector('.zone[data-zone="discard"]');
+  if (!zone || !S.V) return null;
   const zr = zone.getBoundingClientRect();
   if (x > zr.left - 10 && x < zr.right + 10 && y > zr.top - 10 && y < zr.bottom + 10) return { zone: 'discard' };
   // ¿encima de otra carta mía o de un hueco?
@@ -1202,36 +1280,45 @@ function dropTarget(x, y) {
   V.players[V.me].hand.forEach((h, i) => {
     if (i === drag.slot) return;
     const el = elByKey(keyOf(V.me, i));
-    let cx, cy, rad;
-    if (el) { const r = el.getBoundingClientRect(); cx = r.left + r.width / 2; cy = r.top + r.height / 2; rad = r.width * .7; }
-    else return;
-    const d = Math.hypot(x - cx, y - cy);
-    if (d < rad && d < bd) { bd = d; best = i; }
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const d = Math.hypot(x - (r.left + r.width / 2), y - (r.top + r.height / 2));
+    if (d < Math.max(r.width, r.height) * .6 && d < bd) { bd = d; best = i; }
   });
   return best !== null ? { slot: best } : null;
 }
+// Termina el arrastre pase lo que pase y quita cualquier carta colgada.
+function endDrag() {
+  document.querySelectorAll('#dragGhost').forEach(g => g.remove());
+  items.querySelectorAll('.dragging, .droppable').forEach(x => x.classList.remove('dragging', 'droppable'));
+  if (drag) { try { $('#game').releasePointerCapture(drag.id); } catch {} }
+  drag = null;
+}
 addEventListener('pointerup', e => {
   if (!drag || e.pointerId !== drag.id) return;
-  const d = drag; drag = null;
-  if (d.ghost) d.ghost.remove();
-  d.el.classList.remove('dragging');
-  items.querySelectorAll('.droppable').forEach(x => x.classList.remove('droppable'));
+  const d = drag;
+  const t = d.moved ? dropTarget(e.clientX, e.clientY) : null;
+  endDrag();
   if (!d.moved) return; // fue un toque: lo gestiona el click
-  d.el.dataset.dragged = '1';
-  const t = dropTarget(e.clientX, e.clientY);
-  if (!t) return;
+  S.justDragged = Date.now();
+  if (!t || !S.V) return;
   if (t.zone) {
     if (S.V.phase !== 'play') return toast('Todavía no se puede echar', true);
     send({ a: 'match', slot: d.slot });
   } else send({ a: 'move', from: d.slot, to: t.slot });
 });
-addEventListener('pointercancel', () => { if (drag) { drag.ghost && drag.ghost.remove(); drag.el.classList.remove('dragging'); drag = null; } });
+addEventListener('pointercancel', endDrag);
+$('#game').addEventListener('lostpointercapture', () => { if (drag && drag.moved) endDrag(); });
+addEventListener('blur', endDrag);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'visible') endDrag(); });
+// Red de seguridad: un arrastre sin movimiento durante 5 s se da por terminado
+setInterval(() => { if (drag && drag.moved && Date.now() - drag.last > 5000) endDrag(); }, 1000);
 
 items.addEventListener('click', e => {
   const V = S.V; if (!V) return;
   audio();
   const c = e.target.closest('.card');
-  if (c && c.dataset.dragged) { delete c.dataset.dragged; return; }
+  if (S.justDragged && Date.now() - S.justDragged < 400) return;
   const zone = (c && c.dataset.zone) || (c && c.dataset.key === 'deck' && 'deck') || (e.target.closest('.zone') && e.target.closest('.zone').dataset.zone);
   const it = interaction(V);
   if (zone === 'deck' && it.deck) return send({ a: 'draw' });
