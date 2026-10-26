@@ -20,6 +20,7 @@ function run(i) {
     if (!v || ws.readyState !== 1 || wait-- > 0) return;
     const me = v.players[v.me];
     const mine = me.hand.map((h, k) => (h ? k : -1)).filter(k => k >= 0);
+    if (v.phase === 'ready' && !me.ready) return send({ a: 'ready' });
     if (v.phase !== 'play') return;
     if (v.matchRank !== null && v.caboBy !== v.me && mine.length && Math.random() < 0.05) return send({ a: 'match', slot: pick(mine) });
     if (v.turn !== v.me) return;

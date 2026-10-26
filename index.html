@@ -201,6 +201,14 @@ h2 { margin: 0; font-family: var(--display); font-weight: 800; font-size: 24px; 
 @keyframes bigIn { from { transform: translateY(30px) rotateY(90deg) scale(.8); opacity: 0; } }
 @keyframes fadeIn { from { opacity: 0; } }
 @keyframes shrink { to { transform: scaleX(0); } }
+#readyBox { position: absolute; z-index: 6; left: 50%; top: 52%; transform: translate(-50%, -50%); width: min(440px, 86vw); max-height: 80vh; overflow: auto; background: rgba(8,14,11,.9); border: 2px solid var(--gold); border-radius: 22px; padding: 16px; display: flex; flex-direction: column; gap: 10px; align-items: center; text-align: center; box-shadow: 0 20px 50px rgba(0,0,0,.6); animation: fadeIn .3s ease-out; }
+#readyBox b { font: 800 26px var(--display); }
+#readyBox p { margin: 0; font-size: 15px; color: #e8dcb8; }
+#readyBox .chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+#readyBox .chips span { background: rgba(255,255,255,.1); border-radius: 999px; padding: 4px 10px; font-weight: 700; font-size: 14px; }
+#readyBox .chips span.on { background: #2f7d55; }
+#readyBox .abtn { width: 100%; }
+#readyBox .abtn.big { min-height: 60px; font-size: 22px; }
 #count { position: absolute; z-index: 21; left: 50%; top: 46%; transform: translate(-50%, -50%); pointer-events: none; text-align: center; }
 #count b { display: block; font: 800 min(40vh, 190px)/1 var(--display); color: #fff3cf; text-shadow: 0 8px 0 #a33a26, 0 14px 40px rgba(0,0,0,.6); animation: tick .9s ease-out both; }
 #count span { font-weight: 800; background: rgba(8,14,11,.8); padding: 6px 14px; border-radius: 12px; }
@@ -322,6 +330,7 @@ h2 { margin: 0; font-family: var(--display); font-weight: 800; font-size: 24px; 
   <div class="hud" id="actions"></div>
   <div id="banner"></div>
   <div id="bigHost"></div>
+  <div id="readyHost"></div>
   <div id="countHost"></div>
   <div id="pillHost"></div>
   <div id="sheetHost"></div>
@@ -624,7 +633,7 @@ document.addEventListener('click', e => {
 
 // ---------- Geometría de la mesa (coordenadas del tapete: 1000 × 620) ----------
 const CX = 500, CY = 310;
-const SC = { me: .6, other: .4, pile: .5, held: .8, heldOther: .46 };
+const SC = { me: .85, other: .4, pile: .5, held: .8, heldOther: .46 };
 const PILE = { deck: { x: CX - 85, y: CY - 45 }, discard: { x: CX + 85, y: CY - 45 } };
 
 function seatAngle(V, p) {
@@ -632,7 +641,7 @@ function seatAngle(V, p) {
   return Math.PI / 2 + k * 2 * Math.PI / n;
 }
 function handCenter(V, p) {
-  if (p === V.me) return { x: CX - 40, y: CY + 200, r: 0, s: SC.me };
+  if (p === V.me) return { x: CX - 30, y: CY + 235, r: 0, s: SC.me };
   const a = seatAngle(V, p);
   return { x: CX + 345 * Math.cos(a), y: CY + 190 * Math.sin(a), r: a * 180 / Math.PI - 90, s: V.players.length > 6 ? .32 : SC.other };
 }
@@ -645,7 +654,7 @@ function slotPos(V, p, slot) {
   return { x: h.x + lx * Math.cos(rad) - ly * Math.sin(rad), y: h.y + lx * Math.sin(rad) + ly * Math.cos(rad), r: h.r, s: h.s };
 }
 function heldPos(V, p) {
-  if (p === V.me) return { x: CX + 225, y: CY + 150, z: 90, r: 4, s: SC.held, tilt: -30 };
+  if (p === V.me) return { x: CX + 250, y: CY + 175, z: 90, r: 4, s: SC.held, tilt: -30 };
   const h = handCenter(V, p);
   return { x: h.x + (CX - h.x) * .42, y: h.y + (CY - h.y) * .42, z: 70, r: 0, s: SC.heldOther, tilt: -30 };
 }
@@ -765,7 +774,7 @@ function render() {
     el.className = 'seat' + (V.phase === 'play' && V.turn === pi ? ' turn' : '') + (online ? '' : ' off');
     el.dataset.seat = pi;
     el.style.transform = `translate3d(${sp.x - 75}px, ${sp.y - 150}px, 0) rotateX(-38deg) scale(1.35)`;
-    const badge = V.caboBy === pi ? '<span class="badge cabo">CAPO</span>' : '';
+    const badge = V.caboBy === pi ? '<span class="badge cabo">CAPO</span>' : V.phase === 'ready' && p.ready ? '<span class="badge">✓</span>' : '';
     el.innerHTML = `<div class="bub" style="border-color:${esc(p.color)}">${esc(p.avatar)}${badge}</div><div class="tagn">${esc(p.name)}</div><div class="pts">🏆 ${p.total}${online ? '' : ' · sin conexión'}</div>`;
     frag.append(el);
   });
@@ -779,6 +788,10 @@ function nameOf(V, p) { return p === V.me ? 'Tú' : V.players[p].name; }
 
 function statusText(V) {
   const me = V.players[V.me];
+  if (V.phase === 'ready') {
+    if (!me.ready) return { t: '¿Preparado? Pulsa «Estoy listo»', mine: true };
+    return { t: `Esperando a ${V.players.filter(p => !p.ready).map(p => p.name).join(', ')}…` };
+  }
   if (V.phase === 'peek') return { t: 'Mira tus dos cartas de abajo y memorízalas', mine: true };
   if (V.phase !== 'play') return { t: V.phase === 'gameEnd' ? 'Fin de la partida' : 'Fin de la ronda' };
   const pre = V.caboBy !== null ? `${V.caboBy === V.me ? 'Has' : V.players[V.caboBy].name + ' ha'} cantado Capo · ${V.turnsLeft === 1 ? 'último turno' : `quedan ${V.turnsLeft} turnos`}. ` : '';
@@ -824,6 +837,7 @@ function renderHUD(V) {
     }
   }
   // Por si el servidor no arranca solo la ronda (no debería pasar)
+  renderReady(V, host);
   if (V.phase === 'peek' && host && Date.now() - S.peekSince > 9000) A.push(`<button class="abtn ghost" data-act="forceSkip">Empezar ya</button>`);
   if (V.phase === 'peek' && host && Date.now() - S.peekSince <= 9000 && !S.peekTimer) S.peekTimer = setTimeout(() => { S.peekTimer = null; S.V && S.V.phase === 'peek' && renderHUD(S.V); }, 9200 - (Date.now() - S.peekSince));
   if (V.phase === 'play' && host && V.turn !== V.me) {
@@ -850,33 +864,57 @@ function clearStaleSelection() {
   }
 }
 
-// Ajusta la mesa al tamaño de la pantalla: mide mesa, asientos y mis cartas y lo encuadra todo.
+// Ajusta la mesa al tamaño de la pantalla. Se calcula con la misma perspectiva que usa el CSS
+// (#stage: perspective 1150px, origen 50% 18%; #table: rotateX(38deg)) en vez de medir elementos,
+// porque Safari mide mal las cosas en 3D y tarda en dar el tamaño nuevo al girar el móvil.
+const TILT = 38 * Math.PI / 180, PERSP = 1150;
+function projectPt(pt, k, tx, ty, W, H) {
+  const X = pt.x - 500, Y0 = pt.y - 310, z = pt.z || 0;
+  const Y = Y0 * Math.cos(TILT) - z * Math.sin(TILT);
+  const Z = Y0 * Math.sin(TILT) + z * Math.cos(TILT);
+  const sx = W / 2 + tx + k * X, sy = H / 2 + ty + k * (Y - (pt.up || 0));
+  const ox = W / 2, oy = H * .18, f = PERSP / (PERSP - Z);
+  return [ox + (sx - ox) * f, oy + (sy - oy) * f];
+}
+function fitPoints(V) {
+  const pts = [];
+  for (let i = 0; i < 24; i++) { const a = i / 24 * Math.PI * 2; pts.push({ x: 500 + 534 * Math.cos(a), y: 310 + 344 * Math.sin(a) }); }
+  V.players.forEach((p, pi) => {
+    if (pi === V.me) {
+      p.hand.forEach((h, si) => { const c = slotPos(V, pi, si); pts.push({ x: c.x - 70 * c.s, y: c.y - 100 * c.s, z: 2 }, { x: c.x + 70 * c.s, y: c.y + 100 * c.s, z: 2 }); });
+    } else {
+      const sp = seatPos(V, pi);
+      pts.push({ x: sp.x - 60, y: sp.y }, { x: sp.x + 60, y: sp.y }, { x: sp.x, y: sp.y, up: 135 });
+    }
+  });
+  return pts;
+}
 function fitTable() {
-  const w = $('#world');
   if (!S.V || document.getElementById('game').hidden) return;
-  const top = 58, bottom = 6, side = 8;
-  const aw = innerWidth - side * 2, ah = innerHeight - top - bottom;
-  // La perspectiva no es lineal: se mide, se corrige y se vuelve a medir.
-  let k = 1, tx = 0, ty = 0;
-  for (let pass = 0; pass < 3; pass++) {
-    w.style.transform = `translate(${tx}px, ${ty}px) scale(${k})`;
-    const els = [$('#table .rim'), ...items.querySelectorAll('.seat .bub, .seat .pts, .card[data-mine]')];
+  const W = innerWidth, H = innerHeight;
+  if (!W || !H) return;
+  const top = 48, bottom = 4, side = 8;
+  const aw = W - side * 2, ah = H - top - bottom;
+  const pts = fitPoints(S.V);
+  let k = .5, tx = 0, ty = 0;
+  for (let pass = 0; pass < 8; pass++) {
     let L = 1e9, T = 1e9, R = -1e9, B = -1e9;
-    for (const e of els) { const r = e.getBoundingClientRect(); if (!r.width) continue; L = Math.min(L, r.left); T = Math.min(T, r.top); R = Math.max(R, r.right); B = Math.max(B, r.bottom); }
-    if (R < L) return;
+    for (const p of pts) { const [x, y] = projectPt(p, k, tx, ty, W, H); L = Math.min(L, x); R = Math.max(R, x); T = Math.min(T, y); B = Math.max(B, y); }
     const f = Math.min(aw / (R - L), ah / (B - T));
-    const ox = innerWidth / 2 + tx, oy = innerHeight / 2 + ty;
-    // escala alrededor del origen del mundo y centra la caja
-    const nL = ox + (L - ox) * f, nT = oy + (T - oy) * f, nR = ox + (R - ox) * f, nB = oy + (B - oy) * f;
     k *= f;
-    tx += (side + aw / 2) - (nL + nR) / 2;
-    ty += (top + ah / 2) - (nT + nB) / 2;
+    tx += (side + aw / 2) - (L + R) / 2 * 1;
+    ty += (top + ah / 2) - (T + B) / 2;
   }
-  w.style.transform = `translate(${tx}px, ${ty}px) scale(${k})`;
+  $('#world').style.transform = `translate(${tx}px, ${ty}px) scale(${k})`;
   S.fitKey = fitKey();
 }
-const fitKey = () => S.V ? `${S.V.players.length}:${S.V.players[S.V.me].hand.length > 4 ? 'b' : 'a'}:${innerWidth}x${innerHeight}` : '';
-addEventListener('resize', () => { S.fitKey = null; fitTable(); });
+const fitKey = () => S.V ? `${S.V.players.length}:${S.V.players[S.V.me].hand.length}:${innerWidth}x${innerHeight}` : '';
+function refitSoon() { S.fitKey = null; fitTable(); for (const ms of [120, 400, 900, 1600]) setTimeout(() => { S.fitKey = null; fitTable(); }, ms); }
+addEventListener('resize', refitSoon);
+addEventListener('orientationchange', refitSoon);
+if (window.visualViewport) visualViewport.addEventListener('resize', refitSoon);
+// Por si acaso: si el tamaño cambia sin aviso, se reajusta
+setInterval(() => { if (S.V && S.fitKey !== fitKey()) fitTable(); }, 700);
 
 // ---------- Animaciones ----------
 function flyer(card, from, to, { up0 = false, up1 = false, dur = 460, lift = 70 } = {}) {
@@ -907,6 +945,21 @@ function floatEmoji(V, p, e) {
   const d = document.createElement('div'); d.className = 'float-emoji'; d.textContent = e;
   d.style.left = pos.x + 'px'; d.style.top = pos.y - 10 + 'px';
   document.body.append(d); setTimeout(() => d.remove(), 1900);
+}
+
+// Antes de la cuenta atrás: todos confirman que están preparados (y con el móvil en horizontal)
+function renderReady(V, host) {
+  const box = $('#readyHost');
+  if (V.phase !== 'ready') { box.innerHTML = ''; return; }
+  const me = V.players[V.me];
+  const waiting = V.players.filter(p => !p.ready);
+  box.innerHTML = `<div id="readyBox">
+    <b>Ronda ${V.round}</b>
+    <p>${me.ready ? 'Esperando a los demás…' : 'Cuando estéis todos, empieza la cuenta atrás y verás tus dos cartas de abajo.'}</p>
+    <div class="chips">${V.players.map(p => `<span class="${p.ready ? 'on' : ''}">${esc(p.avatar)} ${esc(p.name)}${p.ready ? ' ✓' : ''}</span>`).join('')}</div>
+    ${me.ready ? '' : '<button class="abtn go big" data-act="ready">¡Estoy listo!</button>'}
+    ${host && me.ready && waiting.length ? `<button class="abtn ghost" data-act="forceSkip">Empezar sin esperar a ${esc(waiting.map(p => p.name).join(', '))}</button>` : ''}
+  </div>`;
 }
 
 // Cartas en grande en el centro de la pantalla (solo las ve quien las mira)
@@ -964,7 +1017,6 @@ async function animate(ev, O, N, fast) {
       }
       await Promise.all(jobs);
       unhide();
-      if (ev.showIn) await countdownAndShow(ev, N, S.msg.events);
       break;
     }
     case 'peek': {
@@ -978,6 +1030,8 @@ async function animate(ev, O, N, fast) {
       } else { liftCard(k, 1600); }
       break;
     }
+    case 'countdown': await countdownAndShow(ev, N, S.msg.events); break;
+    case 'ready': if (ev.p !== me) sfx.pop(); break;
     case 'start': toast('¡A jugar!'); break;
     case 'turn':
       if (ev.p === me) { sfx.turn(); buzz(60); banner('¡Te toca!'); await sleep(fast ? 0 : 500); }
@@ -1288,7 +1342,9 @@ function addBot() {
   ws.onmessage = e => { const m = JSON.parse(e.data); if (m.type === 'state') { v = m.view; wait = 1 + Math.floor(Math.random() * 2); } };
   const timer = setInterval(() => {
     if (ws.readyState > 1) return clearInterval(timer);
-    if (!v || v.phase !== 'play' || wait-- > 0) return;
+    if (!v || wait-- > 0) return;
+    if (v.phase === 'ready' && !v.players[v.me].ready) return bsend({ a: 'ready' });
+    if (v.phase !== 'play') return;
     const mine = v.players[v.me].hand.map((h, k) => (h ? k : -1)).filter(k => k >= 0);
     if (v.matchRank !== null && v.caboBy !== v.me && mine.length && Math.random() < 0.04) return bsend({ a: 'match', slot: pick(mine) });
     if (v.turn !== v.me) return;
@@ -1349,6 +1405,7 @@ const actions = {
   cabo: () => send({ a: 'cabo' }),
   discard: () => send({ a: 'discard' }),
   skip: () => send({ a: 'skip' }),
+  ready: () => { audio(); send({ a: 'ready' }); },
   done: () => { hideBig(); send({ a: 'done' }); },
   finish: () => { closeSheet(); S.sheet = null; send({ a: 'finish' }); },
   p12yes: () => send({ a: 'p12swap', yes: true }),

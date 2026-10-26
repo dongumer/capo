@@ -6,7 +6,7 @@
 //   12: miras una tuya y una de otro y, si quieres, las cambias.
 // - Cuando cae una carta al descarte, el primero que eche una del mismo número se la quita.
 //   Si se equivoca, la carta vuelve a su sitio y roba una de castigo.
-// - Al repartir, cada uno ve un momento sus dos cartas de abajo (huecos 1 y 3).
+// - Al repartir, todos pulsan «Estoy listo»; tras una cuenta atrás cada uno ve sus dos cartas de abajo (huecos 1 y 3).
 // - En tu turno robas del mazo (no se puede coger del descarte) o cantas «¡Capo!».
 // - Tras cantar Capo los demás juegan una vuelta más. Quien menos sume gana la ronda: +1.
 //   Se juega hasta que queráis; gana quien más rondas haya ganado.
@@ -43,7 +43,7 @@ export function newGame(players, settings = {}) {
     phase: 'peek',
     round: 0,
     starter: rnd(players.length),
-    players: players.map(p => ({ id: p.id, name: p.name, avatar: p.avatar, color: p.color, total: 0, hand: [] })),
+    players: players.map(p => ({ id: p.id, name: p.name, avatar: p.avatar, color: p.color, total: 0, hand: [], ready: false })),
     deck: [], discard: [],
     turn: 0, step: 'draw', held: null, power: null,
     caboBy: null, turnsLeft: 0, matchRank: null,
@@ -59,15 +59,23 @@ export function startRound(st) {
   st.discard = [];
   for (const p of st.players) {
     p.hand = [st.deck.pop(), st.deck.pop(), st.deck.pop(), st.deck.pop()];
+    p.ready = false;
   }
   if (st.round > 1) st.starter = (st.starter + 1) % st.players.length;
   st.turn = st.starter;
-  st.phase = 'peek';
+  st.phase = 'ready';
   st.step = 'draw';
   st.held = null; st.power = null;
   st.caboBy = null; st.turnsLeft = 0; st.matchRank = null;
   st.results = null;
-  const events = [{ t: 'deal', round: st.round, starter: st.starter }];
+  return [{ t: 'deal', round: st.round, starter: st.starter }];
+}
+
+// Cuando todos están listos: cuenta atrás y cada uno ve sus dos cartas de abajo.
+function startPeek(st) {
+  st.phase = 'peek';
+  st.players.forEach(p => { p.ready = true; });
+  const events = [{ t: 'countdown' }];
   st.players.forEach((p, pi) => {
     for (const slot of BOTTOM) events.push({ t: 'peek', p: pi, slot, initial: true, priv: { to: pi, card: p.hand[slot] } });
   });
@@ -158,6 +166,14 @@ export function act(st, pi, a) {
   const myTurn = st.turn === pi && st.phase === 'play';
 
   switch (a.a) {
+    // --- Antes de la cuenta atrás: todos confirman que están preparados ---
+    case 'ready': {
+      if (st.phase !== 'ready') return err('La ronda ya ha empezado');
+      p.ready = true;
+      events.push({ t: 'ready', p: pi });
+      if (st.players.every(q => q.ready)) events.push(...startPeek(st));
+      return okEv(events);
+    }
     // --- Turno: robar del mazo o cantar Capo ---
     case 'draw': {
       if (!myTurn || st.step !== 'draw') return err('Ahora no puedes robar');
@@ -301,6 +317,7 @@ export function act(st, pi, a) {
 
     // --- El anfitrión salta el turno de alguien que no responde ---
     case 'forceSkip': {
+      if (st.phase === 'ready') return okEv(startPeek(st));
       if (st.phase === 'peek') return okEv(beginPlay(st));
       if (st.phase !== 'play') return err('No hay turno que saltar');
       if (st.step === 'hold') {
@@ -327,7 +344,7 @@ export function viewFor(st, pi) {
     turn: st.turn,
     step: st.step,
     players: st.players.map(p => ({
-      id: p.id, name: p.name, avatar: p.avatar, color: p.color, total: p.total,
+      id: p.id, name: p.name, avatar: p.avatar, color: p.color, total: p.total, ready: p.ready,
       hand: p.hand.map(c => (c ? (reveal ? c : 1) : 0)),
     })),
     deckCount: st.deck.length,

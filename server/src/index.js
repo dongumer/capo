@@ -78,15 +78,21 @@ export class Room extends DurableObject {
     await this.ctx.storage.setAlarm(this.timerAt() || Date.now() + ROOM_TTL);
   }
 
-  // Al repartir: animación, cuenta atrás y las dos cartas de abajo en grande. Luego empieza solo.
+  // Al repartir se espera a que todos pulsen «Estoy listo».
   async deal() {
     const ev = startRound(this.s.game);
-    const dealMs = 1300 + 280 * this.s.game.players.length;
-    ev[0].showIn = dealMs + COUNTDOWN_MS;
-    ev[0].showMs = SHOW_MS;
-    this.s.peekAt = Date.now() + dealMs + COUNTDOWN_MS + SHOW_MS + 400;
+    this.s.peekAt = null;
     await this.save();
     this.broadcast(ev);
+  }
+
+  // Si empieza la cuenta atrás: se dice a los móviles cuándo enseñar las cartas y el servidor arranca luego solo.
+  timeCountdown(events) {
+    const c = events.find(e => e.t === 'countdown');
+    if (!c) return;
+    c.showIn = COUNTDOWN_MS + 300;
+    c.showMs = SHOW_MS;
+    this.s.peekAt = Date.now() + c.showIn + SHOW_MS + 400;
   }
 
   async alarm() {
@@ -243,6 +249,7 @@ export class Room extends DurableObject {
     if (m.a === 'forceSkip' && !isHost) return reply('Solo quien creó la partida puede saltar turnos');
     const res = act(g, pi, m);
     if (!res.ok) return reply(res.error);
+    this.timeCountdown(res.events);
     await this.save();
     this.broadcast(res.events);
   }

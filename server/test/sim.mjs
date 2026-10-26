@@ -33,11 +33,7 @@ for (let g = 0; g < 400; g++) {
   const n = 2 + (g % 7);
   const st = newGame(Array.from({ length: n }, (_, i) => ({ id: 'p' + i, name: 'J' + i })));
   let startEvents = startRound(st);
-  // Al repartir, cada uno ve sus dos cartas de abajo y nadie más
-  for (const ev of startEvents.filter(e => e.t === 'peek')) {
-    assert.ok([1, 3].includes(ev.slot));
-    st.players.forEach((_, i) => assert.equal(eventFor(ev, i).card !== undefined, i === ev.p));
-  }
+  assert.equal(startEvents.some(e => e.t === 'peek'), false); // nadie ve nada hasta que todos estén listos
   let guard = 0;
   while (st.phase !== 'gameEnd' && guard++ < 200000) {
     if (st.phase === 'roundEnd') {
@@ -48,7 +44,17 @@ for (let g = 0; g < 400; g++) {
       startEvents = startRound(st); continue;
     }
     let res;
-    if (st.phase === 'peek') {
+    if (st.phase === 'ready') {
+      const i = st.players.findIndex(q => !q.ready);
+      res = act(st, i, { a: 'ready' });
+      const last = !st.players.some(q => !q.ready);
+      assert.equal(res.events.some(e => e.t === 'countdown'), last);
+      // Tras la cuenta atrás, cada uno ve sus dos cartas de abajo y nadie más
+      for (const ev of res.events.filter(e => e.t === 'peek')) {
+        assert.ok([1, 3].includes(ev.slot));
+        st.players.forEach((_, j) => assert.equal(eventFor(ev, j).card !== undefined, j === ev.p));
+      }
+    } else if (st.phase === 'peek') {
       const ev = startEvents.splice(0);
       checkPrivacy(st, ev);
       res = { ok: true, events: beginPlay(st) };
