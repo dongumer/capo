@@ -339,7 +339,7 @@ const params = new URLSearchParams(location.search);
 // En local (este PC o el móvil por la wifi de casa) se usa el servidor de pruebas del PC.
 const LOCAL = /^(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)$/.test(location.hostname);
 // Dirección del servidor en Cloudflare (se rellena al publicarlo).
-const SERVER = params.get('server') || (LOCAL ? `http://${location.hostname === 'localhost' ? '127.0.0.1' : location.hostname}:8787` : 'https://capo.REEMPLAZAR.workers.dev');
+const SERVER = params.get('server') || (LOCAL ? `http://${location.hostname === 'localhost' ? '127.0.0.1' : location.hostname}:8787` : 'https://capo.capo-server.workers.dev');
 const WS_URL = SERVER.replace(/^http/, 'ws');
 const SUF = params.get('yo') ? '.' + params.get('yo') : ''; // para probar varios jugadores en un mismo PC
 
