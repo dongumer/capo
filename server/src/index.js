@@ -1,7 +1,7 @@
 // Servidor del Capo en Cloudflare: una "sala" (Durable Object) por código de partida.
 // La sala guarda el estado, reparte, comprueba las jugadas y manda a cada uno solo lo que puede ver.
 import { DurableObject } from 'cloudflare:workers';
-import { newGame, startRound, beginPlay, finishGame, leaveGame, setAway, act, viewFor, eventFor, MAX_PLAYERS, DEFAULTS } from './engine.js';
+import { newGame, startRound, beginPlay, finishGame, closeRound, leaveGame, setAway, act, viewFor, eventFor, MAX_PLAYERS, DEFAULTS } from './engine.js';
 
 const ALLOWED = [
   /^https:\/\/dongumer\.github\.io$/,
@@ -13,6 +13,7 @@ const ROOM_TTL = 1000 * 60 * 60 * 24; // una sala sin movimiento se borra a las 
 const COUNTDOWN_MS = 3000; // cuenta atrás antes de enseñar las dos cartas de abajo
 const SHOW_MS = 3000; // lo que se ven en grande
 const AWAY_MS = 90000; // quien pasa este tiempo sin conexión sale de la partida (da tiempo a mirar WhatsApp y volver)
+const CLOSE_MS = 4000; // última oportunidad para echar tras el último turno, antes de destapar
 const LOOK_MS = 3500; // lo que tiene quien usa la sota para mirar su carta antes de pasar el turno
 
 const okOrigin = o => !o || ALLOWED.some(r => r.test(o));
@@ -70,6 +71,7 @@ export class Room extends DurableObject {
     const t = [];
     if (g.phase === 'peek' && this.s.peekAt) t.push(this.s.peekAt);
     if (g.phase === 'play' && g.step === 'power' && g.power.stage === 'seeing' && this.s.lookAt) t.push(this.s.lookAt);
+    if (g.phase === 'play' && g.step === 'closing' && this.s.closeAt) t.push(this.s.closeAt);
     for (const at of Object.values(this.s.awaySince || {})) t.push(at + this.awayMs());
     return t.length ? Math.min(...t) : null;
   }
@@ -79,6 +81,11 @@ export class Room extends DurableObject {
     const g = this.s.game;
     if (g && g.phase === 'play' && g.step === 'power' && g.power.stage === 'seeing') this.s.lookAt = this.s.lookAt || Date.now() + LOOK_MS;
     else this.s.lookAt = null;
+    // Última oportunidad: 4 s; si alguien ya ha echado, ya no puede echar nadie más y se destapa enseguida
+    if (g && g.phase === 'play' && g.step === 'closing') {
+      this.s.closeAt = this.s.closeAt || Date.now() + CLOSE_MS;
+      if (g.matchRank === null) this.s.closeAt = Math.min(this.s.closeAt, Date.now() + 1300);
+    } else this.s.closeAt = null;
     await this.ctx.storage.put('s', this.s);
     // La alarma sirve también para borrar salas viejas.
     await this.ctx.storage.setAlarm(this.timerAt() || Date.now() + ROOM_TTL);
@@ -118,6 +125,7 @@ export class Room extends DurableObject {
       let ev = [], extra = {};
       if (g.phase === 'peek' && this.s.peekAt && this.s.peekAt <= now) { ev.push(...beginPlay(g)); this.s.peekAt = null; }
       if (g.phase === 'play' && g.step === 'power' && g.power.stage === 'seeing' && this.s.lookAt && this.s.lookAt <= now) ev.push(...act(g, g.turn, { a: 'done' }).events);
+      if (g.phase === 'play' && g.step === 'closing' && this.s.closeAt && this.s.closeAt <= now) ev.push(...closeRound(g));
       for (const [pid, since] of Object.entries(this.s.awaySince || {})) {
         if (since + this.awayMs() > now || this.online().has(pid)) continue;
         const r = this.removeFromGame(pid, 'Has estado mucho rato sin conexión y has salido de la partida.');

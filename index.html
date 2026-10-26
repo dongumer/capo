@@ -798,7 +798,7 @@ function render() {
     el.dataset.zone = 'discard';
     frag.append(el);
   });
-  if (V.matchRank !== null && V.phase === 'play' && V.caboBy !== V.me) {
+  if (V.matchRank !== null && V.phase === 'play') {
     const h = document.createElement('div'); h.className = 'match-hint';
     h.textContent = `¿Tienes un ${V.matchRank}? ¡Arrástralo aquí!`;
     Object.assign(h.style, { left: PILE.discard.x - 95 + 'px', top: PILE.discard.y + 82 + 'px' });
@@ -845,7 +845,7 @@ function render() {
     const sp = seatPos(V, pi);
     const online = !p.away && (!S.msg.lobby || S.msg.lobby.some(l => l.id === p.id && l.online));
     const el = document.createElement('div');
-    el.className = 'seat' + (V.phase === 'play' && V.turn === pi ? ' turn' : '') + (online ? '' : ' off');
+    el.className = 'seat' + (V.phase === 'play' && V.step !== 'closing' && V.turn === pi ? ' turn' : '') + (online ? '' : ' off');
     el.dataset.seat = pi;
     el.style.transform = `translate3d(${sp.x - 75}px, ${sp.y - 150}px, 0) rotateX(-38deg) scale(1.35)`;
     const badge = V.caboBy === pi ? '<span class="badge cabo">CAPO</span>' : V.phase === 'ready' && p.ready ? '<span class="badge">✓</span>' : '';
@@ -867,6 +867,7 @@ function statusText(V) {
     return { t: `Esperando a ${V.players.filter(p => !p.ready && !p.left && !p.away).map(p => p.name).join(', ')}…` };
   }
   if (V.phase === 'peek') return { t: 'Mira tus dos cartas de abajo y memorízalas', mine: true };
+  if (V.phase === 'play' && V.step === 'closing') return { t: V.matchRank !== null ? `¡Última oportunidad! Si tienes un ${V.matchRank}, échalo ya` : 'Se destapan las cartas…', mine: true };
   if (V.phase !== 'play') return { t: V.phase === 'gameEnd' ? 'Fin de la partida' : 'Fin de la ronda' };
   const pre = V.caboBy !== null ? `${V.caboBy === V.me ? 'Has' : V.players[V.caboBy].name + ' ha'} cantado Capo · ${V.turnsLeft === 1 ? 'último turno' : `quedan ${V.turnsLeft} turnos`}. ` : '';
   if (V.turn !== V.me) {
@@ -914,7 +915,7 @@ function renderHUD(V) {
   renderReady(V, host);
   if (V.phase === 'peek' && host && Date.now() - S.peekSince > 9000) A.push(`<button class="abtn ghost" data-act="forceSkip">Empezar ya</button>`);
   if (V.phase === 'peek' && host && Date.now() - S.peekSince <= 9000 && !S.peekTimer) S.peekTimer = setTimeout(() => { S.peekTimer = null; S.V && S.V.phase === 'peek' && renderHUD(S.V); }, 9200 - (Date.now() - S.peekSince));
-  if (V.phase === 'play' && host && V.turn !== V.me) {
+  if (V.phase === 'play' && V.step !== 'closing' && host && V.turn !== V.me) {
     const cur = V.players[V.turn];
     const online = !cur.away && S.msg.lobby.some(l => l.id === cur.id && l.online);
     if (!online) A.push(`<button class="abtn ghost" data-act="forceSkip">Saltar a ${esc(cur.name)}</button>`);
@@ -1220,6 +1221,7 @@ async function animate(ev, O, N, fast) {
       await sleep(fast ? 0 : 900);
       break;
     case 'reshuffle': toast('Se acabó el mazo: se baraja el descarte'); break;
+    case 'closing': sfx.turn(); buzz(40); toast('¡Última oportunidad para echar antes de destapar!'); break;
     case 'left': if (ev.p !== me) { toast(`${N.players[ev.p].name} se ha ido de la partida`); S.fitKey = null; } break;
     case 'away': if (ev.p !== me) toast(`${N.players[ev.p].name} se ha quedado sin conexión`); break;
     case 'back': if (ev.p !== me) toast(`${N.players[ev.p].name} ha vuelto`); break;
@@ -1407,7 +1409,7 @@ function rulesHTML() {
     <p>Gana quien termine con <b>menos puntos</b>. Cada uno tiene 4 cartas boca abajo y al repartir ve un momento las <b>dos de abajo</b>. ¡Hay que acordarse!</p>
     <h3>En tu turno</h3>
     <ul><li><b>Roba del mazo</b>: cámbiala por una de tus cartas (la tuya va al descarte) o tírala. Del descarte no se coge nunca.</li>
-    <li>O canta <b>¡Capo!</b> si crees que tienes menos que nadie: los demás juegan una vuelta más y se destapan las cartas.</li></ul>
+    <li>O canta <b>¡Capo!</b> si crees que tienes menos que nadie: los demás juegan una vuelta más (tú puedes seguir echando cartas). Tras el último turno hay unos segundos para echar y luego se destapan las cartas.</li></ul>
     <h3>Cartas especiales (al tirarlas recién robadas)</h3>
     <p>${m('c', 7)} El <b>7 vale −1</b>.</p>
     <p>${m('o', 10)} <b>Sota</b>: mira una carta tuya.</p>
@@ -1443,7 +1445,7 @@ function addBot() {
     if (v.phase === 'ready' && !v.players[v.me].ready) return bsend({ a: 'ready' });
     if (v.phase !== 'play') return;
     const mine = v.players[v.me].hand.map((h, k) => (h ? k : -1)).filter(k => k >= 0);
-    if (v.matchRank !== null && v.caboBy !== v.me && mine.length && Math.random() < 0.04) return bsend({ a: 'match', slot: pick(mine) });
+    if (v.matchRank !== null && mine.length && Math.random() < 0.04) return bsend({ a: 'match', slot: pick(mine) });
     if (v.turn !== v.me) return;
     if (v.step === 'draw') return bsend(v.caboBy === null && Math.random() < 0.06 ? { a: 'cabo' } : { a: 'draw' });
     if (v.step === 'hold') return bsend(Math.random() < 0.5 ? { a: 'swap', slot: pick(mine) } : { a: 'discard' });

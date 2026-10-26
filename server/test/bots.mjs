@@ -22,7 +22,7 @@ function run(i) {
     const mine = me.hand.map((h, k) => (h ? k : -1)).filter(k => k >= 0);
     if (v.phase === 'ready' && !me.ready) return send({ a: 'ready' });
     if (v.phase !== 'play') return;
-    if (v.matchRank !== null && v.caboBy !== v.me && mine.length && Math.random() < 0.05) return send({ a: 'match', slot: pick(mine) });
+    if (v.matchRank !== null && mine.length && Math.random() < 0.05) return send({ a: 'match', slot: pick(mine) });
     if (v.turn !== v.me) return;
     if (v.step === 'draw') return send(v.caboBy === null && Math.random() < 0.06 ? { a: 'cabo' } : { a: 'draw' });
     if (v.step === 'hold') return send(Math.random() < 0.5 ? { a: 'swap', slot: pick(mine) } : { a: 'discard' });

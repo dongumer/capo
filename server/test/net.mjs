@@ -61,7 +61,7 @@ while (steps++ < 6000) {
   const mine = me.hand.map((h, i) => (h ? i : -1)).filter(i => i >= 0);
   if (w.matchRank !== null && Math.random() < 0.2) {
     const o = pick(bots), ov = o.last.view, oh = ov.players[ov.me].hand.map((h, i) => (h ? i : -1)).filter(i => i >= 0);
-    if (oh.length && ov.caboBy !== ov.me) o.send({ a: 'match', slot: pick(oh) });
+    if (oh.length) o.send({ a: 'match', slot: pick(oh) });
   } else if (w.step === 'draw') {
     if (w.caboBy === null && Math.random() < 0.08) cur.send({ a: 'cabo' });
     else cur.send({ a: 'draw' });

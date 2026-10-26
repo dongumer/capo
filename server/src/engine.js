@@ -8,7 +8,9 @@
 //   Si se equivoca, la carta vuelve a su sitio y roba una de castigo.
 // - Al repartir, todos pulsan «Estoy listo»; tras una cuenta atrás cada uno ve sus dos cartas de abajo (huecos 1 y 3).
 // - En tu turno robas del mazo (no se puede coger del descarte) o cantas «¡Capo!».
-// - Tras cantar Capo los demás juegan una vuelta más. Quien menos sume gana la ronda: +1.
+// - Tras cantar Capo los demás juegan una vuelta más (quien canta también puede echar cartas).
+//   Tras el último turno hay unos segundos para echar antes de destapar.
+//   Quien menos sume gana la ronda: +1.
 //   Se juega hasta que queráis; gana quien más rondas haya ganado.
 // - Quien se va (o pasa mucho rato sin conexión) deja de estar en la partida: sus cartas vuelven
 //   al mazo y se salta su turno. Quien está sin conexión no hace esperar a los demás para empezar.
@@ -157,7 +159,7 @@ export function leaveGame(st, pi) {
   const p = st.players[pi];
   const events = [];
   if (!p || p.left) return { events, alone: active(st).length < 2 };
-  const wasTurn = st.phase === 'play' && st.turn === pi;
+  const wasTurn = st.phase === 'play' && st.turn === pi && st.step !== 'closing';
   // sus cartas vuelven al fondo del mazo
   const cards = p.hand.filter(Boolean);
   if (wasTurn && st.held) cards.push(st.held.card);
@@ -192,7 +194,13 @@ function endTurn(st, events) {
   st.power = null;
   if (st.caboBy !== null) {
     st.turnsLeft--;
-    if (st.turnsLeft <= 0) return endRound(st, events);
+    if (st.turnsLeft <= 0) {
+      // Última oportunidad: si la última carta tirada se puede echar, se deja un momento antes de destapar
+      if (st.matchRank === null) return endRound(st, events);
+      st.step = 'closing';
+      events.push({ t: 'closing', rank: st.matchRank });
+      return;
+    }
   }
   advance(st);
   events.push({ t: 'turn', p: st.turn });
@@ -213,6 +221,14 @@ function endRound(st, events) {
   st.held = null; st.power = null;
   st.phase = 'roundEnd';
   events.push({ t: 'roundEnd', results: st.results, hands: st.players.map(p => p.hand), totals: st.players.map(p => p.total) });
+}
+
+// Se acaba el tiempo de la última oportunidad: se destapan las cartas.
+export function closeRound(st) {
+  if (st.phase !== 'play' || st.step !== 'closing') return [];
+  const events = [];
+  endRound(st, events);
+  return events;
 }
 
 // Se acaba la partida cuando lo decidís: gana quien más rondas haya ganado.
@@ -353,7 +369,6 @@ export function act(st, pi, a) {
     // --- Echar una carta igual a la del descarte (cualquiera, el más rápido) ---
     case 'match': {
       if (st.phase !== 'play') return err('Ahora no se puede echar');
-      if (pi === st.caboBy) return err('Has cantado Capo: ya no puedes echar cartas');
       if (st.matchRank === null) return err('Llegas tarde: ya lo ha echado otro');
       if (!validSlot(p, a.slot)) return err('Esa carta no existe');
       const c = p.hand[a.slot];
@@ -388,6 +403,7 @@ export function act(st, pi, a) {
       if (st.phase === 'ready') return okEv(startPeek(st));
       if (st.phase === 'peek') return okEv(beginPlay(st));
       if (st.phase !== 'play') return err('No hay turno que saltar');
+      if (st.step === 'closing') return okEv(closeRound(st));
       if (st.step === 'hold') {
         st.discard.push(st.held.card);
         st.matchRank = st.held.card.r;

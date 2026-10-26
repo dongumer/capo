@@ -1,6 +1,6 @@
 // Juega muchas partidas con jugadores al azar y comprueba que las reglas no se rompen.
 import assert from 'node:assert/strict';
-import { newGame, startRound, beginPlay, finishGame, leaveGame, setAway, active, act, viewFor, eventFor, value, handTotal } from '../src/engine.js';
+import { newGame, startRound, beginPlay, finishGame, closeRound, leaveGame, setAway, active, act, viewFor, eventFor, value, handTotal } from '../src/engine.js';
 
 const pick = arr => arr[Math.floor(Math.random() * arr.length)];
 const slots = p => p.hand.map((c, i) => (c ? i : -1)).filter(i => i >= 0);
@@ -28,6 +28,7 @@ function checkPrivacy(st, events) {
   });
 }
 
+let closings = 0;
 let leaves = 0, aways = 0, alones = 0;
 let games = 0, rounds = 0, actions = 0, matchesOk = 0, matchesBad = 0, cabos = 0;
 for (let g = 0; g < 400; g++) {
@@ -86,7 +87,7 @@ for (let g = 0; g < 400; g++) {
       if (st.matchRank !== null && Math.random() < 0.3) {
         const j = Math.floor(Math.random() * n), q = st.players[j];
         const s = slots(q);
-        if (s.length && j !== st.caboBy) {
+        if (s.length) {
           const hit = s.find(k => q.hand[k].r === st.matchRank);
           const k = hit !== undefined && Math.random() < 0.7 ? hit : pick(s);
           const r = act(st, j, { a: 'match', slot: k });
@@ -101,7 +102,11 @@ for (let g = 0; g < 400; g++) {
         const s = p.hand.length;
         if (s > 1 && !(st.step === 'power')) { const r = act(st, i, { a: 'move', from: 0, to: s - 1 }); assert.ok(r.ok, r.error); }
       }
-      if (st.step === 'draw') {
+      if (st.step === 'closing') {
+        // última oportunidad para echar; luego se destapa
+        res = { ok: true, events: closeRound(st) };
+        closings++;
+      } else if (st.step === 'draw') {
         if (st.caboBy === null && (handTotal(p) < 12 || Math.random() < 0.03) && Math.random() < 0.5) { res = act(st, i, { a: 'cabo' }); cabos++; }
         else res = act(st, i, { a: 'draw' });
       } else if (st.step === 'hold') {
@@ -166,6 +171,8 @@ for (let g = 0; g < 400; g++) {
   act(st, 1, { a: 'draw' }); act(st, 1, { a: 'discard' });
   assert.equal(st.turn, 2);
   act(st, 2, { a: 'draw' }); act(st, 2, { a: 'discard' });
+  assert.equal(st.step, 'closing'); // última oportunidad para echar antes de destapar
+  closeRound(st);
   assert.ok(st.phase === 'roundEnd' || st.phase === 'gameEnd');
   assert.deepEqual(st.results.winners, [0]); // tenía -1
   assert.equal(st.players[0].total, 1);
@@ -207,6 +214,37 @@ for (let g = 0; g < 400; g++) {
   console.log('✓ echar tu segundo 5 después de cambiar el primero: sí, una vez; dos a la vez: no');
 }
 
+// Tu ejemplo: alguien canta Capo, eres el último, robas un 3, lo tiras y aún puedes echar tu otro 3.
+// Quien canta Capo también puede echar.
+{
+  const st = newGame([{ id: 'a' }, { id: 'b' }, { id: 'c' }]);
+  startRound(st); st.phase = 'play'; st.turn = 0;
+  st.players[0].hand = [{ s: 'o', r: 6 }, { s: 'c', r: 6 }, { s: 'e', r: 2 }, { s: 'b', r: 1 }];
+  st.players[2].hand = [{ s: 'b', r: 3 }, { s: 'o', r: 4 }, { s: 'e', r: 4 }, { s: 'c', r: 5 }];
+  act(st, 0, { a: 'cabo' });
+  st.deck.push({ s: 'o', r: 1 });
+  act(st, 1, { a: 'draw' }); act(st, 1, { a: 'discard' });
+  st.deck.push({ s: 'e', r: 3 });
+  act(st, 2, { a: 'draw' }); act(st, 2, { a: 'discard' }); // último turno: tira el 3 robado
+  assert.equal(st.step, 'closing');
+  let r = act(st, 2, { a: 'match', slot: 0 }); // y echa su otro 3
+  assert.ok(r.ok && r.events[0].ok, r.error);
+  assert.equal(st.players[2].hand.filter(Boolean).length, 3);
+  closeRound(st);
+  assert.equal(st.phase, 'roundEnd');
+  console.log('✓ el último en jugar puede echar su carta igual antes de destapar');
+
+  const s2 = newGame([{ id: 'a' }, { id: 'b' }]);
+  startRound(s2); s2.phase = 'play'; s2.turn = 0;
+  s2.players[0].hand = [{ s: 'o', r: 6 }, { s: 'c', r: 2 }, { s: 'e', r: 2 }, { s: 'b', r: 1 }];
+  act(s2, 0, { a: 'cabo' });
+  s2.deck.push({ s: 'c', r: 6 });
+  act(s2, 1, { a: 'draw' }); act(s2, 1, { a: 'discard' });
+  r = act(s2, 0, { a: 'match', slot: 0 }); // quien cantó Capo echa su 6
+  assert.ok(r.ok && r.events[0].ok, r.error);
+  console.log('✓ quien canta Capo puede echar cartas');
+}
+
 // Las cartas de quien canta Capo sí se pueden cambiar con el caballo o el rey
 {
   const st = newGame([{ id: 'a' }, { id: 'b' }, { id: 'c' }]);
@@ -223,5 +261,6 @@ for (let g = 0; g < 400; g++) {
   console.log('✓ a quien canta Capo le pueden cambiar cartas');
 }
 
+console.log(`Últimas oportunidades: ${closings}`);
 console.log(`Se van ${leaves}, desconexiones ${aways}, se quedan solos ${alones}`);
 console.log(`OK: ${games} partidas, ${rounds} rondas, ${actions} acciones, ${cabos} cabos, echadas buenas ${matchesOk} / malas ${matchesBad}`);

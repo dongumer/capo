@@ -20,7 +20,7 @@ El Cabo con las reglas de casa, para jugar con amigos cada uno desde su móvil.
 - Cuando cae una carta al descarte, el primero que eche una del mismo número se la quita. Si falla, la carta vuelve y roba una de castigo.
 - Puedes mover tus cartas de sitio (los demás lo ven).
 - Quien sale de la partida (o pasa 90 s sin conexión) deja de jugar: sus cartas vuelven al mazo. Si solo queda uno, se vuelve a la sala.
-- Tras cantar Capo, los demás juegan una vuelta más. Quien menos sume gana la ronda (+1). Se juega hasta que queráis; gana quien más rondas haya ganado.
+- Tras cantar Capo, los demás juegan una vuelta más (quien canta puede seguir echando y le pueden cambiar cartas). Tras el último turno hay 4 s para echar antes de destapar. Quien menos sume gana la ronda (+1). Se juega hasta que queráis; gana quien más rondas haya ganado.
 
 ## Probar en casa
 
