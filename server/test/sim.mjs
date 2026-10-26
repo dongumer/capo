@@ -1,0 +1,148 @@
+// Juega muchas partidas con jugadores al azar y comprueba que las reglas no se rompen.
+import assert from 'node:assert/strict';
+import { newGame, startRound, act, viewFor, eventFor, value, handTotal } from '../src/engine.js';
+
+const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+const slots = p => p.hand.map((c, i) => (c ? i : -1)).filter(i => i >= 0);
+
+function countCards(st) {
+  return st.deck.length + st.discard.length + (st.held ? 1 : 0) + st.players.reduce((a, p) => a + p.hand.filter(Boolean).length, 0);
+}
+
+function checkPrivacy(st, events) {
+  // Ninguna vista ni evento enseña a otro jugador cartas ocultas.
+  st.players.forEach((_, i) => {
+    const v = viewFor(st, i);
+    if (st.phase === 'play' || st.phase === 'peek') {
+      v.players.forEach(q => q.hand.forEach(h => assert.ok(h === 0 || h === 1)));
+      if (st.held && st.held.from === 'deck' && st.turn !== i) assert.equal(v.held.card, null);
+    }
+    for (const ev of events) {
+      const e = eventFor(ev, i);
+      if (ev.priv && ev.priv.to !== i) {
+        assert.equal(e.card === undefined || ev.t === 'match' || ev.t === 'discard', true, 'fuga en ' + ev.t);
+        assert.equal(e.inc, undefined);
+        assert.equal(e.mine, undefined);
+      }
+    }
+  });
+}
+
+let games = 0, rounds = 0, actions = 0, matchesOk = 0, matchesBad = 0, cabos = 0;
+for (let g = 0; g < 400; g++) {
+  const n = 2 + (g % 5);
+  const st = newGame(Array.from({ length: n }, (_, i) => ({ id: 'p' + i, name: 'J' + i })));
+  startRound(st);
+  let guard = 0;
+  while (st.phase !== 'gameEnd' && guard++ < 200000) {
+    if (st.phase === 'roundEnd') { rounds++; startRound(st); continue; }
+    let res;
+    if (st.phase === 'peek') {
+      const i = st.players.findIndex(p => !p.ready);
+      const p = st.players[i];
+      res = p.peeks < 2 ? act(st, i, { a: 'initPeek', slot: p.peeks }) : act(st, i, { a: 'ready' });
+    } else {
+      const i = st.turn, p = st.players[i];
+      // A veces alguien intenta echar una carta (bien o mal)
+      if (st.matchRank !== null && Math.random() < 0.3) {
+        const j = Math.floor(Math.random() * n), q = st.players[j];
+        const s = slots(q);
+        if (s.length && j !== st.caboBy) {
+          const hit = s.find(k => q.hand[k].r === st.matchRank);
+          const k = hit !== undefined && Math.random() < 0.7 ? hit : pick(s);
+          const r = act(st, j, { a: 'match', slot: k });
+          assert.ok(r.ok, r.error);
+          r.events.filter(e => e.t === 'match').forEach(e => (e.ok ? matchesOk++ : matchesBad++));
+          checkPrivacy(st, r.events);
+          assert.equal(countCards(st), 40);
+          continue;
+        }
+      }
+      if (Math.random() < 0.05) {
+        const s = p.hand.length;
+        if (s > 1 && !(st.step === 'power')) { const r = act(st, i, { a: 'move', from: 0, to: s - 1 }); assert.ok(r.ok, r.error); }
+      }
+      if (st.step === 'draw') {
+        if (st.caboBy === null && (handTotal(p) < 12 || Math.random() < 0.03) && Math.random() < 0.5) { res = act(st, i, { a: 'cabo' }); cabos++; }
+        else if (st.discard.length && slots(p).length && Math.random() < 0.3) res = act(st, i, { a: 'take' });
+        else res = act(st, i, { a: 'draw' });
+      } else if (st.step === 'hold') {
+        const s = slots(p);
+        if (st.held.from === 'discard' || (s.length && Math.random() < 0.5)) res = act(st, i, { a: 'swap', slot: pick(s) });
+        else res = act(st, i, { a: 'discard' });
+      } else if (st.step === 'power') {
+        const pw = st.power;
+        const others = st.players.map((q, k) => k).filter(k => k !== i && k !== st.caboBy && slots(st.players[k]).length);
+        const s = slots(p);
+        if (pw.type === 10 && s.length) res = act(st, i, { a: 'p10', slot: pick(s) });
+        else if ((pw.type === 11 || pw.type === 12) && pw.stage === 'pick' && s.length && others.length) {
+          const tp = pick(others);
+          res = act(st, i, { a: 'p' + pw.type, slot: pick(s), tp, tslot: pick(slots(st.players[tp])) });
+        } else if (pw.stage === 'decide') res = act(st, i, { a: 'p12swap', yes: Math.random() < 0.5 });
+        else res = act(st, i, { a: 'skip' });
+      }
+    }
+    assert.ok(res.ok, res.error + ' ' + JSON.stringify({ phase: st.phase, step: st.step }));
+    actions++;
+    checkPrivacy(st, res.events);
+    if (st.phase === 'play' || st.phase === 'peek') assert.equal(countCards(st), 40);
+  }
+  assert.equal(st.phase, 'gameEnd', 'partida sin terminar');
+  assert.ok(st.players.some(p => p.total >= st.settings.limit));
+  games++;
+}
+
+// Casos concretos
+{
+  const st = newGame([{ id: 'a' }, { id: 'b' }, { id: 'c' }]);
+  startRound(st);
+  st.phase = 'play'; st.turn = 0;
+  // Puntos: el 7 vale -1
+  assert.equal(value({ s: 'o', r: 7 }), -1);
+  assert.equal(value({ s: 'o', r: 12 }), 12);
+  // Echar: solo el primero
+  st.players[0].hand = [{ s: 'o', r: 3 }, { s: 'c', r: 5 }, { s: 'e', r: 1 }, { s: 'b', r: 2 }];
+  st.players[1].hand = [{ s: 'c', r: 5 }, { s: 'o', r: 4 }, { s: 'e', r: 6 }, { s: 'b', r: 7 }];
+  st.players[2].hand = [{ s: 'e', r: 5 }, { s: 'o', r: 1 }, { s: 'e', r: 4 }, { s: 'b', r: 10 }];
+  st.deck = [{ s: 'o', r: 5 }, { s: 'b', r: 3 }];
+  act(st, 0, { a: 'draw' });
+  act(st, 0, { a: 'discard' }); // tira un 3? no: roba el último del mazo (3)
+  assert.equal(st.matchRank, 3);
+  let r = act(st, 1, { a: 'match', slot: 0 }); // tiene un 5: se equivoca
+  assert.equal(r.events.find(e => e.t === 'match').ok, false);
+  assert.equal(st.players[1].hand.filter(Boolean).length, 5);
+  r = act(st, 0, { a: 'match', slot: 0 }); // tiene el 3: acierta
+  assert.equal(r.events.find(e => e.t === 'match').ok, true);
+  assert.equal(st.players[0].hand[0], null);
+  r = act(st, 2, { a: 'match', slot: 0 });
+  assert.equal(r.ok, false); // ya lo echó otro
+  // Cabo: los demás juegan un turno más y se puntúa
+  st.turn = 1; st.step = 'draw';
+  st.players[0].hand = [null, { s: 'o', r: 7 }, null, null]; // -1
+  st.turn = 0;
+  act(st, 0, { a: 'cabo' });
+  assert.equal(st.turn, 1);
+  st.deck = [{ s: 'o', r: 1 }, { s: 'c', r: 1 }];
+  act(st, 1, { a: 'draw' }); act(st, 1, { a: 'discard' });
+  assert.equal(st.turn, 2);
+  act(st, 2, { a: 'draw' }); act(st, 2, { a: 'discard' });
+  assert.ok(st.phase === 'roundEnd' || st.phase === 'gameEnd');
+  assert.equal(st.results.caboOk, true);
+  assert.equal(st.results.add[0], 0);
+  // 12: mirar y cambiar
+  const s2 = newGame([{ id: 'a' }, { id: 'b' }]);
+  startRound(s2); s2.phase = 'play'; s2.turn = 0;
+  s2.deck.push({ s: 'o', r: 12 });
+  act(s2, 0, { a: 'draw' }); act(s2, 0, { a: 'discard' });
+  assert.equal(s2.step, 'power');
+  const a0 = s2.players[0].hand[0], b2 = s2.players[1].hand[2];
+  r = act(s2, 0, { a: 'p12', slot: 0, tp: 1, tslot: 2 });
+  assert.deepEqual(eventFor(r.events[0], 0).theirs, b2);
+  assert.equal(eventFor(r.events[0], 1).theirs, undefined);
+  act(s2, 0, { a: 'p12swap', yes: true });
+  assert.deepEqual(s2.players[0].hand[0], b2);
+  assert.deepEqual(s2.players[1].hand[2], a0);
+  assert.equal(s2.turn, 1);
+}
+
+console.log(`OK: ${games} partidas, ${rounds} rondas, ${actions} acciones, ${cabos} cabos, echadas buenas ${matchesOk} / malas ${matchesBad}`);
