@@ -325,7 +325,6 @@ export function act(st, pi, a) {
       if (!validSlot(p, a.slot)) return err('Elige una de tus cartas');
       const tp = a.tp, q = st.players[tp];
       if (!q || tp === pi || q.left) return err('Elige una carta de otro jugador');
-      if (tp === st.caboBy) return err('Las cartas de quien ha cantado Capo no se tocan');
       if (!validSlot(q, a.tslot)) return err('Esa carta no existe');
       if (type === 11) {
         [p.hand[a.slot], q.hand[a.tslot]] = [q.hand[a.tslot], p.hand[a.slot]];
@@ -354,7 +353,7 @@ export function act(st, pi, a) {
     // --- Echar una carta igual a la del descarte (cualquiera, el más rápido) ---
     case 'match': {
       if (st.phase !== 'play') return err('Ahora no se puede echar');
-      if (pi === st.caboBy) return err('Has cantado Capo: tus cartas ya no se mueven');
+      if (pi === st.caboBy) return err('Has cantado Capo: ya no puedes echar cartas');
       if (st.matchRank === null) return err('Llegas tarde: ya lo ha echado otro');
       if (!validSlot(p, a.slot)) return err('Esa carta no existe');
       const c = p.hand[a.slot];

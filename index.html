@@ -822,7 +822,7 @@ function render() {
         el.dataset.mine = '1';
         if (it.mine) el.classList.add('pick');
         if (S.sel.own === si) el.classList.add('sel');
-      } else if (it.others && pi !== V.caboBy) {
+      } else if (it.others) {
         el.classList.add('pick');
       }
       if (S.sel.tp === pi && S.sel.tslot === si) el.classList.add('sel');
@@ -1343,8 +1343,7 @@ items.addEventListener('click', e => {
     if (pw.type === 10 && p === V.me) return send({ a: 'p10', slot });
     if ((pw.type === 11 || pw.type === 12) && pw.stage === 'pick') {
       if (p === V.me) S.sel.own = S.sel.own === slot ? null : slot;
-      else if (p !== V.caboBy) { if (S.sel.tp === p && S.sel.tslot === slot) { S.sel.tp = S.sel.tslot = null; } else { S.sel.tp = p; S.sel.tslot = slot; } }
-      else return toast('Las cartas de quien ha cantado Capo no se tocan', true);
+      else { if (S.sel.tp === p && S.sel.tslot === slot) { S.sel.tp = S.sel.tslot = null; } else { S.sel.tp = p; S.sel.tslot = slot; } }
       sfx.pop();
       if (S.sel.own != null && S.sel.tp != null) { send({ a: 'p' + pw.type, slot: S.sel.own, tp: S.sel.tp, tslot: S.sel.tslot }); }
       render();
@@ -1450,7 +1449,7 @@ function addBot() {
     if (v.step === 'hold') return bsend(Math.random() < 0.5 ? { a: 'swap', slot: pick(mine) } : { a: 'discard' });
     if (v.step === 'power') {
       const t = v.power.type;
-      const others = v.players.map((p, k) => k).filter(k => k !== v.me && k !== v.caboBy && v.players[k].hand.some(Boolean));
+      const others = v.players.map((p, k) => k).filter(k => k !== v.me && v.players[k].hand.some(Boolean));
       if (t === 10 && v.power.stage === 'seeing') return bsend({ a: 'done' });
       if (t === 10 && mine.length) return bsend({ a: 'p10', slot: pick(mine) });
       if (v.power.stage === 'decide') return bsend({ a: 'p12swap', yes: Math.random() < 0.5 });

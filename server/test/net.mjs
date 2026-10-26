@@ -70,7 +70,7 @@ while (steps++ < 6000) {
     else cur.send({ a: 'discard' });
   } else if (w.step === 'power') {
     const t = w.power.type;
-    const others = w.players.map((p, i) => i).filter(i => i !== w.me && i !== w.caboBy && w.players[i].hand.some(Boolean));
+    const others = w.players.map((p, i) => i).filter(i => i !== w.me && w.players[i].hand.some(Boolean));
     if (t === 10 && w.power.stage === 'seeing') { if (Math.random() < 0.3) cur.send({ a: 'done' }); } // si no, lo cierra el servidor
     else if (t === 10 && mine.length) cur.send({ a: 'p10', slot: pick(mine) });
     else if (w.power.stage === 'decide') cur.send({ a: 'p12swap', yes: Math.random() < 0.5 });

@@ -110,7 +110,7 @@ for (let g = 0; g < 400; g++) {
         else res = act(st, i, { a: 'discard' });
       } else if (st.step === 'power') {
         const pw = st.power;
-        const others = st.players.map((q, k) => k).filter(k => k !== i && k !== st.caboBy && slots(st.players[k]).length);
+        const others = st.players.map((q, k) => k).filter(k => k !== i && slots(st.players[k]).length);
         const s = slots(p);
         if (pw.type === 10 && pw.stage === 'seeing') { assert.equal(st.turn, i); res = act(st, i, { a: 'done' }); }
         else if (pw.type === 10 && s.length) res = act(st, i, { a: 'p10', slot: pick(s) });
@@ -205,6 +205,22 @@ for (let g = 0; g < 400; g++) {
   r = act(st, 1, { a: 'match', slot: 0 }); // ni el rival
   assert.equal(r.ok, false);
   console.log('✓ echar tu segundo 5 después de cambiar el primero: sí, una vez; dos a la vez: no');
+}
+
+// Las cartas de quien canta Capo sí se pueden cambiar con el caballo o el rey
+{
+  const st = newGame([{ id: 'a' }, { id: 'b' }, { id: 'c' }]);
+  startRound(st); st.phase = 'play'; st.turn = 0;
+  act(st, 0, { a: 'cabo' });
+  assert.equal(st.turn, 1);
+  st.deck.push({ s: 'o', r: 11 });
+  act(st, 1, { a: 'draw' }); act(st, 1, { a: 'discard' });
+  const mine = st.players[1].hand[0], his = st.players[0].hand[2];
+  const r = act(st, 1, { a: 'p11', slot: 0, tp: 0, tslot: 2 });
+  assert.ok(r.ok, r.error);
+  assert.deepEqual(st.players[0].hand[2], mine);
+  assert.deepEqual(st.players[1].hand[0], his);
+  console.log('✓ a quien canta Capo le pueden cambiar cartas');
 }
 
 console.log(`Se van ${leaves}, desconexiones ${aways}, se quedan solos ${alones}`);
