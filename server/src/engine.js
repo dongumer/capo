@@ -10,6 +10,8 @@
 // - En tu turno robas del mazo (no se puede coger del descarte) o cantas «¡Capo!».
 // - Tras cantar Capo los demás juegan una vuelta más. Quien menos sume gana la ronda: +1.
 //   Se juega hasta que queráis; gana quien más rondas haya ganado.
+// - Quien se va (o pasa mucho rato sin conexión) deja de estar en la partida: sus cartas vuelven
+//   al mazo y se salta su turno. Quien está sin conexión no hace esperar a los demás para empezar.
 
 export const SUITS = ['o', 'c', 'e', 'b']; // oros, copas, espadas, bastos
 export const RANKS = [1, 2, 3, 4, 5, 6, 7, 10, 11, 12];
@@ -43,7 +45,7 @@ export function newGame(players, settings = {}) {
     phase: 'peek',
     round: 0,
     starter: rnd(players.length),
-    players: players.map(p => ({ id: p.id, name: p.name, avatar: p.avatar, color: p.color, total: 0, hand: [], ready: false })),
+    players: players.map(p => ({ id: p.id, name: p.name, avatar: p.avatar, color: p.color, total: 0, hand: [], ready: false, left: false, away: false })),
     deck: [], discard: [],
     turn: 0, step: 'draw', held: null, power: null,
     caboBy: null, turnsLeft: 0, matchRank: null,
@@ -53,15 +55,25 @@ export function newGame(players, settings = {}) {
 }
 
 // Reparte una ronda nueva. Devuelve los eventos.
+// Jugadores que siguen en la partida
+export const active = st => st.players.map((p, i) => i).filter(i => !st.players[i].left);
+const nextActive = (st, from) => {
+  const n = st.players.length;
+  let i = from;
+  for (let k = 0; k < n; k++) { i = (i + 1) % n; if (!st.players[i].left) return i; }
+  return from;
+};
+
 export function startRound(st) {
   st.round++;
   st.deck = newDeck();
   st.discard = [];
   for (const p of st.players) {
-    p.hand = [st.deck.pop(), st.deck.pop(), st.deck.pop(), st.deck.pop()];
-    p.ready = false;
+    p.hand = p.left ? [] : [st.deck.pop(), st.deck.pop(), st.deck.pop(), st.deck.pop()];
+    p.ready = p.left;
   }
-  if (st.round > 1) st.starter = (st.starter + 1) % st.players.length;
+  if (st.round > 1) st.starter = nextActive(st, st.starter);
+  else if (st.players[st.starter].left) st.starter = nextActive(st, st.starter);
   st.turn = st.starter;
   st.phase = 'ready';
   st.step = 'draw';
@@ -77,6 +89,7 @@ function startPeek(st) {
   st.players.forEach(p => { p.ready = true; });
   const events = [{ t: 'countdown' }];
   st.players.forEach((p, pi) => {
+    if (p.left) return;
     for (const slot of BOTTOM) events.push({ t: 'peek', p: pi, slot, initial: true, priv: { to: pi, card: p.hand[slot] } });
   });
   return events;
@@ -89,6 +102,7 @@ export const BOTTOM = [1, 3];
 export function beginPlay(st) {
   if (st.phase !== 'peek') return [];
   st.phase = 'play';
+  if (st.players[st.turn].left) advance(st);
   return [{ t: 'start' }, { t: 'turn', p: st.turn }];
 }
 
@@ -115,7 +129,61 @@ function putInHand(p, card) {
 
 function advance(st) {
   const n = st.players.length;
-  do { st.turn = (st.turn + 1) % n; } while (st.turn === st.caboBy);
+  for (let k = 0; k < n; k++) {
+    st.turn = (st.turn + 1) % n;
+    if (st.turn !== st.caboBy && !st.players[st.turn].left) return;
+  }
+}
+
+// ¿Están listos todos los que siguen y tienen conexión? (los desconectados no hacen esperar)
+function allReady(st) {
+  const waiting = st.players.filter(p => !p.left && !p.away);
+  return waiting.length > 0 && waiting.every(p => p.ready);
+}
+export function checkReady(st) {
+  return st.phase === 'ready' && allReady(st) ? startPeek(st) : [];
+}
+
+// Conexión de un jugador (lo marca el servidor). Si estaban esperándole para empezar, ya no.
+export function setAway(st, pi, away) {
+  const p = st.players[pi];
+  if (!p || p.left || p.away === away) return [];
+  p.away = away;
+  return [{ t: away ? 'away' : 'back', p: pi }, ...checkReady(st)];
+}
+
+// Un jugador se va de la partida. Devuelve { events, alone } (alone: queda menos de 2).
+export function leaveGame(st, pi) {
+  const p = st.players[pi];
+  const events = [];
+  if (!p || p.left) return { events, alone: active(st).length < 2 };
+  const wasTurn = st.phase === 'play' && st.turn === pi;
+  // sus cartas vuelven al fondo del mazo
+  const cards = p.hand.filter(Boolean);
+  if (wasTurn && st.held) cards.push(st.held.card);
+  st.deck = shuffle(cards).concat(st.deck);
+  p.hand = [];
+  p.left = true;
+  p.ready = true;
+  events.push({ t: 'left', p: pi });
+  if (st.caboBy === pi) { st.caboBy = null; st.turnsLeft = 0; }
+  if (st.winner) st.winner = st.winner.filter(i => i !== pi);
+  const alone = active(st).length < 2;
+  if (alone) return { events, alone };
+  if (st.phase === 'ready') events.push(...checkReady(st));
+  if (st.phase === 'play') {
+    if (wasTurn) {
+      st.held = null;
+      if (st.caboBy !== null) st.turnsLeft++; // su turno no cuenta para la vuelta final
+      endTurn(st, events);
+    } else if (st.step === 'power' && st.power && st.power.tp === pi) {
+      // estaban mirando o cambiando una de sus cartas: se cancela
+      events.push({ t: 'keep', p: st.turn });
+      endTurn(st, events);
+    }
+    if (st.caboBy !== null && st.phase === 'play') st.turnsLeft = Math.min(st.turnsLeft, active(st).length - 1);
+  }
+  return { events, alone };
 }
 
 function endTurn(st, events) {
@@ -136,8 +204,8 @@ export function handTotal(p) {
 
 function endRound(st, events) {
   const sums = st.players.map(handTotal);
-  const best = Math.min(...sums);
-  const winners = sums.map((v, i) => (v === best ? i : -1)).filter(i => i >= 0);
+  const best = Math.min(...active(st).map(i => sums[i]));
+  const winners = active(st).filter(i => sums[i] === best);
   const add = sums.map((v, i) => (winners.includes(i) ? 1 : 0));
   st.players.forEach((p, i) => { p.total += add[i]; });
   st.results = { sums, winners, add, caboBy: st.caboBy };
@@ -149,8 +217,8 @@ function endRound(st, events) {
 
 // Se acaba la partida cuando lo decidís: gana quien más rondas haya ganado.
 export function finishGame(st) {
-  const best = Math.max(...st.players.map(p => p.total));
-  st.winner = st.players.map((p, i) => (p.total === best ? i : -1)).filter(i => i >= 0);
+  const best = Math.max(...active(st).map(i => st.players[i].total));
+  st.winner = active(st).filter(i => st.players[i].total === best);
   st.phase = 'gameEnd';
   st.held = null; st.power = null; st.matchRank = null;
   return [{ t: 'gameEnd', winner: st.winner }];
@@ -162,6 +230,7 @@ const validSlot = (p, s) => Number.isInteger(s) && s >= 0 && s < p.hand.length &
 export function act(st, pi, a) {
   const p = st.players[pi];
   if (!p || !a) return err('Acción no válida');
+  if (p.left) return err('Ya no estás en esta partida');
   const events = [];
   const myTurn = st.turn === pi && st.phase === 'play';
 
@@ -171,7 +240,7 @@ export function act(st, pi, a) {
       if (st.phase !== 'ready') return err('La ronda ya ha empezado');
       p.ready = true;
       events.push({ t: 'ready', p: pi });
-      if (st.players.every(q => q.ready)) events.push(...startPeek(st));
+      events.push(...checkReady(st));
       return okEv(events);
     }
     // --- Turno: robar del mazo o cantar Capo ---
@@ -188,7 +257,7 @@ export function act(st, pi, a) {
       if (!myTurn || st.step !== 'draw') return err('Solo puedes cantar Capo al empezar tu turno');
       if (st.caboBy !== null) return err('Ya se ha cantado Capo');
       st.caboBy = pi;
-      st.turnsLeft = st.players.length - 1;
+      st.turnsLeft = active(st).length - 1;
       events.push({ t: 'cabo', p: pi });
       if (st.turnsLeft <= 0) { endRound(st, events); return okEv(events); }
       advance(st);
@@ -255,7 +324,7 @@ export function act(st, pi, a) {
       if (!myTurn || st.step !== 'power' || st.power.type !== type || st.power.stage !== 'pick') return err('No puedes hacer eso ahora');
       if (!validSlot(p, a.slot)) return err('Elige una de tus cartas');
       const tp = a.tp, q = st.players[tp];
-      if (!q || tp === pi) return err('Elige una carta de otro jugador');
+      if (!q || tp === pi || q.left) return err('Elige una carta de otro jugador');
       if (tp === st.caboBy) return err('Las cartas de quien ha cantado Capo no se tocan');
       if (!validSlot(q, a.tslot)) return err('Esa carta no existe');
       if (type === 11) {
@@ -344,7 +413,7 @@ export function viewFor(st, pi) {
     turn: st.turn,
     step: st.step,
     players: st.players.map(p => ({
-      id: p.id, name: p.name, avatar: p.avatar, color: p.color, total: p.total, ready: p.ready,
+      id: p.id, name: p.name, avatar: p.avatar, color: p.color, total: p.total, ready: p.ready, left: p.left, away: p.away,
       hand: p.hand.map(c => (c ? (reveal ? c : 1) : 0)),
     })),
     deckCount: st.deck.length,

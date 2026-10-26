@@ -250,6 +250,7 @@ h2 { margin: 0; font-family: var(--display); font-weight: 800; font-size: 24px; 
 #readyBox .chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
 #readyBox .chips span { background: rgba(255,255,255,.1); border-radius: 999px; padding: 4px 10px; font-weight: 700; font-size: 14px; }
 #readyBox .chips span.on { background: #2f7d55; }
+#readyBox .chips span.off { opacity: .5; }
 #readyBox .abtn { width: 100%; }
 #readyBox .abtn.big { min-height: 60px; font-size: 22px; }
 #count { position: absolute; z-index: 21; left: 50%; top: 46%; transform: translate(-50%, -50%); pointer-events: none; text-align: center; }
@@ -625,7 +626,7 @@ function connect(code) {
     if (m.type === 'pong') return;
     if (m.type === 'fatal') { S.closing = true; store.del('room'); toast(m.error, true); S.msg = null; S.V = null; show('home'); history.replaceState(null, '', location.pathname + (SUF ? '?yo=' + params.get('yo') : '')); return; }
     if (m.type === 'error') { toast(m.error, true); sfx.bad(); return; }
-    if (m.type === 'state') { S.queue.push(m); pump(); }
+    if (m.type === 'state') { S.queue.push(m); pump(); if (m.notice) setTimeout(() => toast(m.notice), 400); }
   };
   ws.onclose = e => {
     if (S.ws !== ws) return;
@@ -705,14 +706,17 @@ const CX = 500, CY = 310;
 const SC = { me: .85, other: .4, pile: .5, held: .8, heldOther: .46 };
 const PILE = { deck: { x: CX - 85, y: CY - 45 }, discard: { x: CX + 85, y: CY - 45 } };
 
+// Quienes siguen en la partida (los que se han ido no ocupan sitio en la mesa)
+const seated = V => V.players.map((p, i) => i).filter(i => !V.players[i].left);
 function seatAngle(V, p) {
-  const n = V.players.length, k = (p - V.me + n) % n;
+  const ring = seated(V), n = ring.length;
+  const k = (ring.indexOf(p) - ring.indexOf(V.me) + n) % n;
   return Math.PI / 2 + k * 2 * Math.PI / n;
 }
 function handCenter(V, p) {
   if (p === V.me) return { x: CX - 30, y: CY + 235, r: 0, s: SC.me };
   const a = seatAngle(V, p);
-  return { x: CX + 345 * Math.cos(a), y: CY + 190 * Math.sin(a), r: a * 180 / Math.PI - 90, s: V.players.length > 6 ? .32 : SC.other };
+  return { x: CX + 345 * Math.cos(a), y: CY + 190 * Math.sin(a), r: a * 180 / Math.PI - 90, s: seated(V).length > 6 ? .32 : SC.other };
 }
 function slotPos(V, p, slot) {
   const h = handCenter(V, p), len = V.players[p].hand.length;
@@ -803,6 +807,7 @@ function render() {
 
   // Manos
   V.players.forEach((p, pi) => {
+    if (p.left) return;
     p.hand.forEach((h, si) => {
       if (!h) return;
       const k = keyOf(pi, si);
@@ -836,9 +841,9 @@ function render() {
 
   // Asientos
   V.players.forEach((p, pi) => {
-    if (pi === V.me) return;
+    if (pi === V.me || p.left) return;
     const sp = seatPos(V, pi);
-    const online = !S.msg.lobby || S.msg.lobby.some(l => l.id === p.id && l.online);
+    const online = !p.away && (!S.msg.lobby || S.msg.lobby.some(l => l.id === p.id && l.online));
     const el = document.createElement('div');
     el.className = 'seat' + (V.phase === 'play' && V.turn === pi ? ' turn' : '') + (online ? '' : ' off');
     el.dataset.seat = pi;
@@ -859,7 +864,7 @@ function statusText(V) {
   const me = V.players[V.me];
   if (V.phase === 'ready') {
     if (!me.ready) return { t: '¿Preparado? Pulsa «Estoy listo»', mine: true };
-    return { t: `Esperando a ${V.players.filter(p => !p.ready).map(p => p.name).join(', ')}…` };
+    return { t: `Esperando a ${V.players.filter(p => !p.ready && !p.left && !p.away).map(p => p.name).join(', ')}…` };
   }
   if (V.phase === 'peek') return { t: 'Mira tus dos cartas de abajo y memorízalas', mine: true };
   if (V.phase !== 'play') return { t: V.phase === 'gameEnd' ? 'Fin de la partida' : 'Fin de la ronda' };
@@ -911,7 +916,7 @@ function renderHUD(V) {
   if (V.phase === 'peek' && host && Date.now() - S.peekSince <= 9000 && !S.peekTimer) S.peekTimer = setTimeout(() => { S.peekTimer = null; S.V && S.V.phase === 'peek' && renderHUD(S.V); }, 9200 - (Date.now() - S.peekSince));
   if (V.phase === 'play' && host && V.turn !== V.me) {
     const cur = V.players[V.turn];
-    const online = S.msg.lobby.some(l => l.id === cur.id && l.online);
+    const online = !cur.away && S.msg.lobby.some(l => l.id === cur.id && l.online);
     if (!online) A.push(`<button class="abtn ghost" data-act="forceSkip">Saltar a ${esc(cur.name)}</button>`);
   }
   $('#actions').innerHTML = A.join('');
@@ -949,6 +954,7 @@ function fitPoints(V) {
   const pts = [];
   for (let i = 0; i < 24; i++) { const a = i / 24 * Math.PI * 2; pts.push({ x: 500 + 534 * Math.cos(a), y: 310 + 344 * Math.sin(a) }); }
   V.players.forEach((p, pi) => {
+    if (p.left) return;
     if (pi === V.me) {
       p.hand.forEach((h, si) => { const c = slotPos(V, pi, si); pts.push({ x: c.x - 70 * c.s, y: c.y - 100 * c.s, z: 2 }, { x: c.x + 70 * c.s, y: c.y + 100 * c.s, z: 2 }); });
     } else {
@@ -977,7 +983,7 @@ function fitTable() {
   $('#world').style.transform = `translate(${tx}px, ${ty}px) scale(${k})`;
   S.fitKey = fitKey();
 }
-const fitKey = () => S.V ? `${S.V.players.length}:${S.V.players[S.V.me].hand.length}:${innerWidth}x${innerHeight}` : '';
+const fitKey = () => S.V ? `${seated(S.V).length}:${S.V.players[S.V.me].hand.length}:${innerWidth}x${innerHeight}` : '';
 function refitSoon() { applyOrient(); S.fitKey = null; fitTable(); for (const ms of [120, 400, 900, 1600]) setTimeout(() => { applyOrient(); S.fitKey = null; fitTable(); }, ms); }
 addEventListener('resize', refitSoon);
 addEventListener('orientationchange', refitSoon);
@@ -1022,11 +1028,11 @@ function renderReady(V, host) {
   const box = $('#readyHost');
   if (V.phase !== 'ready') { box.innerHTML = ''; return; }
   const me = V.players[V.me];
-  const waiting = V.players.filter(p => !p.ready);
+  const waiting = V.players.filter(p => !p.ready && !p.left && !p.away);
   box.innerHTML = `<div id="readyBox">
     <b>Ronda ${V.round}</b>
     <p>${me.ready ? 'Esperando a los demás…' : 'Cuando estéis todos, empieza la cuenta atrás y verás tus dos cartas de abajo.'}</p>
-    <div class="chips">${V.players.map(p => `<span class="${p.ready ? 'on' : ''}">${esc(p.avatar)} ${esc(p.name)}${p.ready ? ' ✓' : ''}</span>`).join('')}</div>
+    <div class="chips">${V.players.filter(p => !p.left).map(p => `<span class="${p.ready ? 'on' : p.away ? 'off' : ''}">${esc(p.avatar)} ${esc(p.name)}${p.away ? ' · sin conexión' : p.ready ? ' ✓' : ''}</span>`).join('')}</div>
     ${me.ready ? '' : '<button class="abtn go big" data-act="ready">¡Estoy listo!</button>'}
     ${host && me.ready && waiting.length ? `<button class="abtn ghost" data-act="forceSkip">Empezar sin esperar a ${esc(waiting.map(p => p.name).join(', '))}</button>` : ''}
   </div>`;
@@ -1214,6 +1220,9 @@ async function animate(ev, O, N, fast) {
       await sleep(fast ? 0 : 900);
       break;
     case 'reshuffle': toast('Se acabó el mazo: se baraja el descarte'); break;
+    case 'left': if (ev.p !== me) { toast(`${N.players[ev.p].name} se ha ido de la partida`); S.fitKey = null; } break;
+    case 'away': if (ev.p !== me) toast(`${N.players[ev.p].name} se ha quedado sin conexión`); break;
+    case 'back': if (ev.p !== me) toast(`${N.players[ev.p].name} ha vuelto`); break;
     case 'skipped': toast(`Se salta el turno de ${who(ev.p)}`); break;
     case 'react': {
       const p = N.players.findIndex(q => q.id === ev.pid);
@@ -1351,7 +1360,7 @@ function openSheet(kind) {
     const over = V && V.phase === 'gameEnd';
     const isHost = S.msg.host === S.pid;
     const showRound = kind === 'results' && R && !over;
-    const order = V.players.map((p, i) => i).sort((a, b) => V.players[b].total - V.players[a].total || (R ? R.sums[a] - R.sums[b] : 0));
+    const order = V.players.map((p, i) => i).filter(i => !V.players[i].left).sort((a, b) => V.players[b].total - V.players[a].total || (R ? R.sums[a] - R.sums[b] : 0));
     let title = 'Marcador', sub = '';
     if (over) title = V.winner.includes(V.me) ? (V.winner.length > 1 ? '¡Empate en cabeza! 🏆' : '¡Has ganado la partida! 🏆') : `Gana ${V.winner.map(i => V.players[i].name).join(' y ')} 🏆`;
     else if (showRound) {
@@ -1465,6 +1474,7 @@ const actions = {
     connect(c);
   },
   leave: () => {
+    if (S.V && S.V.phase !== 'gameEnd' && !confirm('¿Salir de la partida? Tus cartas vuelven al mazo y ya no podrás volver a esta partida.')) return;
     send({ a: 'leave' });
     S.bots.forEach(b => { try { b.send('{"a":"leave"}'); b.close(); } catch {} }); S.bots = [];
     S.closing = true; store.del('room');

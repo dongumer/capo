@@ -1,7 +1,7 @@
 // Servidor del Capo en Cloudflare: una "sala" (Durable Object) por código de partida.
 // La sala guarda el estado, reparte, comprueba las jugadas y manda a cada uno solo lo que puede ver.
 import { DurableObject } from 'cloudflare:workers';
-import { newGame, startRound, beginPlay, finishGame, act, viewFor, eventFor, MAX_PLAYERS, DEFAULTS } from './engine.js';
+import { newGame, startRound, beginPlay, finishGame, leaveGame, setAway, act, viewFor, eventFor, MAX_PLAYERS, DEFAULTS } from './engine.js';
 
 const ALLOWED = [
   /^https:\/\/dongumer\.github\.io$/,
@@ -12,6 +12,7 @@ const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; // sin I ni O para no confundir
 const ROOM_TTL = 1000 * 60 * 60 * 24; // una sala sin movimiento se borra a las 24 h
 const COUNTDOWN_MS = 3000; // cuenta atrás antes de enseñar las dos cartas de abajo
 const SHOW_MS = 3000; // lo que se ven en grande
+const AWAY_MS = 90000; // quien pasa este tiempo sin conexión sale de la partida (da tiempo a mirar WhatsApp y volver)
 const LOOK_MS = 3500; // lo que tiene quien usa la sota para mirar su carta antes de pasar el turno
 
 const okOrigin = o => !o || ALLOWED.some(r => r.test(o));
@@ -59,13 +60,18 @@ export class Room extends DurableObject {
     });
   }
 
+  awayMs() { return +(this.env && this.env.AWAY_MS) || AWAY_MS; } // en pruebas se acorta con --var AWAY_MS:3000
+
   // Temporizadores de la partida: empezar tras el vistazo inicial o pasar el turno tras mirar con la sota.
+  // También: sacar de la partida a quien lleva demasiado rato sin conexión.
   timerAt() {
     const g = this.s.game;
     if (!g) return null;
-    if (g.phase === 'peek' && this.s.peekAt) return this.s.peekAt;
-    if (g.phase === 'play' && g.step === 'power' && g.power.stage === 'seeing') return this.s.lookAt || null;
-    return null;
+    const t = [];
+    if (g.phase === 'peek' && this.s.peekAt) t.push(this.s.peekAt);
+    if (g.phase === 'play' && g.step === 'power' && g.power.stage === 'seeing' && this.s.lookAt) t.push(this.s.lookAt);
+    for (const at of Object.values(this.s.awaySince || {})) t.push(at + this.awayMs());
+    return t.length ? Math.min(...t) : null;
   }
 
   async save() {
@@ -80,8 +86,16 @@ export class Room extends DurableObject {
 
   // Al repartir se espera a que todos pulsen «Estoy listo».
   async deal() {
-    const ev = startRound(this.s.game);
+    const g = this.s.game;
+    const ev = startRound(g);
     this.s.peekAt = null;
+    // Quien ya no tiene conexión al repartir no hace esperar a nadie (y sale si no vuelve)
+    const on = this.online();
+    g.players.forEach((p, i) => {
+      if (p.left || on.has(p.id)) return;
+      ev.push(...setAway(g, i, true));
+      this.s.awaySince = { ...(this.s.awaySince || {}), [p.id]: (this.s.awaySince || {})[p.id] || Date.now() };
+    });
     await this.save();
     this.broadcast(ev);
   }
@@ -96,20 +110,52 @@ export class Room extends DurableObject {
   }
 
   async alarm() {
-    const g = this.s && this.s.game;
     const at = this.s && this.timerAt();
     if (at) {
       if (Date.now() < at - 50) { await this.ctx.storage.setAlarm(at); return; }
-      const ev = g.phase === 'peek' ? beginPlay(g) : act(g, g.turn, { a: 'done' }).events;
-      this.s.peekAt = null;
+      const now = Date.now() + 50;
+      let g = this.s.game;
+      let ev = [], extra = {};
+      if (g.phase === 'peek' && this.s.peekAt && this.s.peekAt <= now) { ev.push(...beginPlay(g)); this.s.peekAt = null; }
+      if (g.phase === 'play' && g.step === 'power' && g.power.stage === 'seeing' && this.s.lookAt && this.s.lookAt <= now) ev.push(...act(g, g.turn, { a: 'done' }).events);
+      for (const [pid, since] of Object.entries(this.s.awaySince || {})) {
+        if (since + this.awayMs() > now || this.online().has(pid)) continue;
+        const r = this.removeFromGame(pid, 'Has estado mucho rato sin conexión y has salido de la partida.');
+        ev.push(...r.events); Object.assign(extra, r.extra);
+      }
+      this.timeCountdown(ev);
       await this.save();
-      this.broadcast(ev);
+      this.broadcast(this.s.game ? ev : [], extra);
       return;
     }
     if (this.s && Date.now() - (this.s.touched || 0) < ROOM_TTL) { await this.ctx.storage.setAlarm((this.s.touched || 0) + ROOM_TTL); return; }
     for (const ws of this.ctx.getWebSockets()) ws.close(4000, 'Sala cerrada');
     await this.ctx.storage.deleteAll();
     this.s = null;
+  }
+
+  // Saca a un jugador de la sala y de la partida. Si queda uno solo, la partida termina y se vuelve a la sala.
+  removeFromGame(pid, why) {
+    const events = [], extra = {};
+    this.s.lobby = this.s.lobby.filter(p => p.id !== pid);
+    if (this.s.awaySince) delete this.s.awaySince[pid];
+    this.s.gone = { ...(this.s.gone || {}), [pid]: why };
+    const g = this.s.game;
+    const gi = g ? g.players.findIndex(p => p.id === pid) : -1;
+    if (gi >= 0) {
+      const r = leaveGame(g, gi);
+      events.push(...r.events);
+      if (r.alone) {
+        this.s.game = null;
+        this.s.awaySince = {};
+        extra.notice = 'Los demás se han ido de la partida. Puedes invitar a más gente desde aquí.';
+      }
+    }
+    if (!this.s.lobby.some(p => p.id === this.s.host) && this.s.lobby.length) {
+      const on = this.online();
+      this.s.host = (this.s.lobby.find(p => on.has(p.id)) || this.s.lobby[0]).id;
+    }
+    return { events, extra };
   }
 
   async claim(code, pid) {
@@ -143,15 +189,21 @@ export class Room extends DurableObject {
     if (known) {
       Object.assign(known, me);
     } else {
-      if (this.s.game) return fail('La partida ya ha empezado y no se puede entrar.');
+      if (this.s.game) return fail((this.s.gone && this.s.gone[pid]) || 'La partida ya ha empezado y no se puede entrar.');
       if (this.s.lobby.length >= MAX_PLAYERS) return fail('La partida está llena (máximo ' + MAX_PLAYERS + ').');
       this.s.lobby.push(me);
     }
     if (!this.s.lobby.some(p => p.id === this.s.host)) this.s.host = this.s.lobby[0].id;
+    // Vuelve alguien que estaba sin conexión
+    let ev = [];
+    const g = this.s.game;
+    const gi = g ? g.players.findIndex(p => p.id === pid) : -1;
+    if (gi >= 0) ev = setAway(g, gi, false);
+    if (this.s.awaySince) delete this.s.awaySince[pid];
     await this.save();
     // Cierra conexiones antiguas del mismo jugador (p. ej. otra pestaña)
     for (const ws of this.ctx.getWebSockets(pid)) if (ws !== server) try { ws.close(4002, 'Abierta en otro sitio'); } catch {}
-    this.broadcast([]);
+    this.broadcast(ev);
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -213,14 +265,14 @@ export class Room extends DurableObject {
         await this.save();
         this.broadcast([]);
         return;
-      case 'leave':
-        if (this.s.game) return;
-        this.s.lobby = this.s.lobby.filter(p => p.id !== pid);
-        if (pid === this.s.host && this.s.lobby.length) this.s.host = this.s.lobby[0].id;
+      case 'leave': {
+        const r = this.removeFromGame(pid, 'Saliste de esta partida y ya no se puede volver a entrar.');
+        this.timeCountdown(r.events);
         await this.save();
         ws.close(1000, 'Salió');
-        this.broadcast([]);
+        this.broadcast(this.s.game ? r.events : [], r.extra);
         return;
+      }
       case 'start': {
         if (!isHost) return reply('Solo quien creó la partida puede empezarla');
         if (this.s.game && this.s.game.phase !== 'gameEnd') return;
@@ -254,11 +306,26 @@ export class Room extends DurableObject {
     this.broadcast(res.events);
   }
 
+  // Alguien pierde la conexión: no se le espera para empezar y, si no vuelve, sale de la partida.
+  async lostConnection(ws) {
+    if (!this.s) return;
+    const pid = this.ctx.getTags(ws)[0];
+    let ev = [];
+    const g = this.s.game;
+    const gi = g ? g.players.findIndex(p => p.id === pid) : -1;
+    if (gi >= 0 && !g.players[gi].left && !this.online().has(pid)) {
+      ev = setAway(g, gi, true);
+      this.s.awaySince = { ...(this.s.awaySince || {}), [pid]: Date.now() };
+      this.timeCountdown(ev);
+      await this.save();
+    }
+    this.broadcast(ev);
+  }
   async webSocketClose(ws) {
     try { ws.close(); } catch {}
-    if (this.s) this.broadcast([]);
+    await this.lostConnection(ws);
   }
   async webSocketError(ws) {
-    if (this.s) this.broadcast([]);
+    await this.lostConnection(ws);
   }
 }

@@ -1,6 +1,6 @@
 // Mantiene la app funcionando sin conexión una vez abierta una vez.
 // Sube el número de CACHE cada vez que cambies archivos, para que el móvil no enseñe la versión vieja.
-const CACHE = 'capo-v7';
+const CACHE = 'capo-v8';
 const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'];
 
 self.addEventListener('install', e => {

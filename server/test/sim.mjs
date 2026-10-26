@@ -1,6 +1,6 @@
 // Juega muchas partidas con jugadores al azar y comprueba que las reglas no se rompen.
 import assert from 'node:assert/strict';
-import { newGame, startRound, beginPlay, finishGame, act, viewFor, eventFor, value, handTotal } from '../src/engine.js';
+import { newGame, startRound, beginPlay, finishGame, leaveGame, setAway, active, act, viewFor, eventFor, value, handTotal } from '../src/engine.js';
 
 const pick = arr => arr[Math.floor(Math.random() * arr.length)];
 const slots = p => p.hand.map((c, i) => (c ? i : -1)).filter(i => i >= 0);
@@ -28,6 +28,7 @@ function checkPrivacy(st, events) {
   });
 }
 
+let leaves = 0, aways = 0, alones = 0;
 let games = 0, rounds = 0, actions = 0, matchesOk = 0, matchesBad = 0, cabos = 0;
 for (let g = 0; g < 400; g++) {
   const n = 2 + (g % 7);
@@ -35,19 +36,40 @@ for (let g = 0; g < 400; g++) {
   let startEvents = startRound(st);
   assert.equal(startEvents.some(e => e.t === 'peek'), false); // nadie ve nada hasta que todos estén listos
   let guard = 0;
+  let alone = false;
   while (st.phase !== 'gameEnd' && guard++ < 200000) {
+    // De vez en cuando alguien se desconecta, vuelve o se va de la partida
+    if (Math.random() < 0.004) {
+      const act_ = active(st), j = act_[Math.floor(Math.random() * act_.length)];
+      const r = leaveGame(st, j); leaves++;
+      assert.ok(st.players[j].left && st.players[j].hand.length === 0);
+      checkPrivacy(st, r.events);
+      if (r.alone) { alone = true; alones++; break; }
+      assert.ok(!st.players[st.turn].left || st.phase !== 'play', 'turno de alguien que se ha ido');
+      if (st.phase === 'play' || st.phase === 'peek') assert.equal(countCards(st), 40);
+      continue;
+    }
+    if (Math.random() < 0.01) {
+      const act_ = active(st), j = act_[Math.floor(Math.random() * act_.length)];
+      const others = act_.filter(i => i !== j && !st.players[i].away);
+      if (others.length) { setAway(st, j, !st.players[j].away); aways++; }
+      continue;
+    }
     if (st.phase === 'roundEnd') {
       rounds++;
-      const R = st.results, best = Math.min(...R.sums);
-      R.sums.forEach((v, i) => assert.equal(R.add[i], v === best ? 1 : 0));
+      const R = st.results;
+      R.sums.forEach((v, i) => assert.equal(R.add[i], R.winners.includes(i) ? 1 : 0));
+      // nadie que siga en la partida tiene menos que un ganador
+      for (const w of R.winners) for (const i of active(st)) assert.ok(R.sums[w] <= R.sums[i] || st.players[w].left);
       if (st.round >= 3) { finishGame(st); break; }
       startEvents = startRound(st); continue;
     }
     let res;
     if (st.phase === 'ready') {
-      const i = st.players.findIndex(q => !q.ready);
+      let i = st.players.findIndex(q => !q.ready && !q.left && !q.away);
+      if (i < 0) { setAway(st, st.players.findIndex(q => q.away), false); continue; }
       res = act(st, i, { a: 'ready' });
-      const last = !st.players.some(q => !q.ready);
+      const last = st.phase === 'peek';
       assert.equal(res.events.some(e => e.t === 'countdown'), last);
       // Tras la cuenta atrás, cada uno ve sus dos cartas de abajo y nadie más
       for (const ev of res.events.filter(e => e.t === 'peek')) {
@@ -104,8 +126,9 @@ for (let g = 0; g < 400; g++) {
     checkPrivacy(st, res.events);
     if (st.phase === 'play' || st.phase === 'peek') assert.equal(countCards(st), 40);
   }
+  if (alone) { games++; continue; }
   assert.equal(st.phase, 'gameEnd', 'partida sin terminar');
-  assert.ok(st.winner.every(w => st.players[w].total === Math.max(...st.players.map(p => p.total))));
+  assert.ok(st.winner.every(w => st.players[w].total === Math.max(...active(st).map(i => st.players[i].total))));
   games++;
 }
 
@@ -163,4 +186,5 @@ for (let g = 0; g < 400; g++) {
   assert.equal(s2.turn, 1);
 }
 
+console.log(`Se van ${leaves}, desconexiones ${aways}, se quedan solos ${alones}`);
 console.log(`OK: ${games} partidas, ${rounds} rondas, ${actions} acciones, ${cabos} cabos, echadas buenas ${matchesOk} / malas ${matchesBad}`);

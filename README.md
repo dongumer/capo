@@ -7,6 +7,7 @@ El Cabo con las reglas de casa, para jugar con amigos cada uno desde su móvil.
   - `npm test`: 400 partidas simuladas comprobando reglas y que nadie ve cartas ajenas.
   - `npm run dev`: servidor local en http://127.0.0.1:8787.
   - `node test/net.mjs`: partida completa de 3 bots contra el servidor local.
+  - `node test/leave.mjs URL`: jugadores que se van o pierden la conexión (servidor con `--var AWAY_MS:3000`).
   - `node test/bots.mjs CODIGO 3`: 3 bots que se unen a una sala para probar la web.
   - `npm run deploy`: publica el servidor en Cloudflare.
 
@@ -18,6 +19,7 @@ El Cabo con las reglas de casa, para jugar con amigos cada uno desde su móvil.
 - Al tirar una recién robada: sota = mira una tuya; caballo = cambia una tuya por una de otro sin mirar; rey = mira una tuya y una de otro y, si quieres, cámbialas.
 - Cuando cae una carta al descarte, el primero que eche una del mismo número se la quita. Si falla, la carta vuelve y roba una de castigo.
 - Puedes mover tus cartas de sitio (los demás lo ven).
+- Quien sale de la partida (o pasa 90 s sin conexión) deja de jugar: sus cartas vuelven al mazo. Si solo queda uno, se vuelve a la sala.
 - Tras cantar Capo, los demás juegan una vuelta más. Quien menos sume gana la ronda (+1). Se juega hasta que queráis; gana quien más rondas haya ganado.
 
 ## Probar en casa
