@@ -90,10 +90,10 @@ console.log('Eventos privados recibidos por cada bot:', bots.map(b => b.seenPriv
 
 // Reconexión: Bea se va y vuelve con el mismo id y sigue en la partida
 bots[1].ws.close();
-await sleep(200);
+for (let i = 0; i < 50 && bots[0].last.lobby.find(p => p.id === 'b').online; i++) await sleep(100); // por internet tarda un poco
 assert.equal(bots[0].last.lobby.find(p => p.id === 'b').online, false);
 const back = await bot('b', 'Bea', code);
-await sleep(200);
+for (let i = 0; i < 50 && !(back.last && bots[0].last.lobby.find(p => p.id === 'b').online); i++) await sleep(100);
 assert.equal(back.last.view.me, 1);
 assert.equal(bots[0].last.lobby.find(p => p.id === 'b').online, true);
 for (const b of [...bots, back]) b.ws.close();
