@@ -1,6 +1,6 @@
 // Juega muchas partidas con jugadores al azar y comprueba que las reglas no se rompen.
 import assert from 'node:assert/strict';
-import { newGame, startRound, act, viewFor, eventFor, value, handTotal } from '../src/engine.js';
+import { newGame, startRound, beginPlay, act, viewFor, eventFor, value, handTotal } from '../src/engine.js';
 
 const pick = arr => arr[Math.floor(Math.random() * arr.length)];
 const slots = p => p.hand.map((c, i) => (c ? i : -1)).filter(i => i >= 0);
@@ -32,15 +32,20 @@ let games = 0, rounds = 0, actions = 0, matchesOk = 0, matchesBad = 0, cabos = 0
 for (let g = 0; g < 400; g++) {
   const n = 2 + (g % 5);
   const st = newGame(Array.from({ length: n }, (_, i) => ({ id: 'p' + i, name: 'J' + i })));
-  startRound(st);
+  let startEvents = startRound(st);
+  // Al repartir, cada uno ve sus dos cartas de abajo y nadie más
+  for (const ev of startEvents.filter(e => e.t === 'peek')) {
+    assert.ok([1, 3].includes(ev.slot));
+    st.players.forEach((_, i) => assert.equal(eventFor(ev, i).card !== undefined, i === ev.p));
+  }
   let guard = 0;
   while (st.phase !== 'gameEnd' && guard++ < 200000) {
-    if (st.phase === 'roundEnd') { rounds++; startRound(st); continue; }
+    if (st.phase === 'roundEnd') { rounds++; startEvents = startRound(st); continue; }
     let res;
     if (st.phase === 'peek') {
-      const i = st.players.findIndex(p => !p.ready);
-      const p = st.players[i];
-      res = p.peeks < 2 ? act(st, i, { a: 'initPeek', slot: p.peeks }) : act(st, i, { a: 'ready' });
+      const ev = startEvents.splice(0);
+      checkPrivacy(st, ev);
+      res = { ok: true, events: beginPlay(st) };
     } else {
       const i = st.turn, p = st.players[i];
       // A veces alguien intenta echar una carta (bien o mal)

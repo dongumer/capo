@@ -45,15 +45,11 @@ await sleep(300);
 assert.equal(bots[1].last.view.phase, 'peek');
 
 let steps = 0;
-while (steps++ < 3000) {
+while (steps++ < 6000) {
   const v = bots[0].last.view;
   if (v.phase === 'gameEnd') break;
   if (v.phase === 'roundEnd') { bots[1].send({ a: 'nextRound' }); await sleep(60); continue; }
-  if (v.phase === 'peek') {
-    for (const b of bots) { const me = b.last.view.players[b.last.view.me]; if (!me.ready) { b.send({ a: 'initPeek', slot: 0 }); b.send({ a: 'initPeek', slot: 1 }); b.send({ a: 'ready' }); } }
-    await sleep(80);
-    continue;
-  }
+  if (v.phase === 'peek') { await sleep(200); continue; } // el servidor empieza solo tras enseñar las cartas
   // Privacidad: nadie ve cartas ajenas ni la carta robada de otro
   for (const b of bots) {
     const w = b.last.view;

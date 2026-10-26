@@ -1,4 +1,4 @@
-// Reglas del Capo (Cabo con las reglas de casa). Sin dependencias: lo usa el servidor y las pruebas.
+// Reglas del Capo (el Cabo con las reglas de casa). Sin dependencias: lo usa el servidor y las pruebas.
 //
 // Baraja española de 40 cartas (1-7, sota 10, caballo 11, rey 12).
 // - El 7 vale -1. El resto vale su número.
@@ -6,6 +6,7 @@
 //   12: miras una tuya y una de otro y, si quieres, las cambias.
 // - Cuando cae una carta al descarte, el primero que eche una del mismo número se la quita.
 //   Si se equivoca, la carta vuelve a su sitio y roba una de castigo.
+// - Al repartir, cada uno ve un momento sus dos cartas de abajo (huecos 1 y 3).
 
 export const SUITS = ['o', 'c', 'e', 'b']; // oros, copas, espadas, bastos
 export const RANKS = [1, 2, 3, 4, 5, 6, 7, 10, 11, 12];
@@ -39,7 +40,7 @@ export function newGame(players, settings = {}) {
     phase: 'peek',
     round: 0,
     starter: rnd(players.length),
-    players: players.map(p => ({ id: p.id, name: p.name, avatar: p.avatar, color: p.color, total: 0, hand: [], peeks: 0, ready: false })),
+    players: players.map(p => ({ id: p.id, name: p.name, avatar: p.avatar, color: p.color, total: 0, hand: [] })),
     deck: [], discard: [],
     turn: 0, step: 'draw', held: null, power: null,
     caboBy: null, turnsLeft: 0, matchRank: null,
@@ -55,8 +56,6 @@ export function startRound(st) {
   st.discard = [];
   for (const p of st.players) {
     p.hand = [st.deck.pop(), st.deck.pop(), st.deck.pop(), st.deck.pop()];
-    p.peeks = 0;
-    p.ready = false;
   }
   if (st.round > 1) st.starter = (st.starter + 1) % st.players.length;
   st.turn = st.starter;
@@ -65,7 +64,21 @@ export function startRound(st) {
   st.held = null; st.power = null;
   st.caboBy = null; st.turnsLeft = 0; st.matchRank = null;
   st.results = null;
-  return [{ t: 'deal', round: st.round, starter: st.starter }];
+  const events = [{ t: 'deal', round: st.round, starter: st.starter }];
+  st.players.forEach((p, pi) => {
+    for (const slot of BOTTOM) events.push({ t: 'peek', p: pi, slot, initial: true, priv: { to: pi, card: p.hand[slot] } });
+  });
+  return events;
+}
+
+// Cartas de abajo (las más cercanas a cada jugador) que se enseñan al repartir.
+export const BOTTOM = [1, 3];
+
+// Termina el vistazo inicial y empieza a jugar quien sale.
+export function beginPlay(st) {
+  if (st.phase !== 'peek') return [];
+  st.phase = 'play';
+  return [{ t: 'start' }, { t: 'turn', p: st.turn }];
 }
 
 const err = msg => ({ ok: false, error: msg, events: [] });
@@ -145,27 +158,7 @@ export function act(st, pi, a) {
   const myTurn = st.turn === pi && st.phase === 'play';
 
   switch (a.a) {
-    // --- Al empezar la ronda: mirar dos cartas propias ---
-    case 'initPeek': {
-      if (st.phase !== 'peek') return err('Ya no se pueden mirar cartas');
-      if (p.peeks >= 2) return err('Ya has mirado dos cartas');
-      if (!validSlot(p, a.slot)) return err('Esa carta no existe');
-      p.peeks++;
-      events.push({ t: 'peek', p: pi, slot: a.slot, priv: { to: pi, card: p.hand[a.slot] } });
-      return okEv(events);
-    }
-    case 'ready': {
-      if (st.phase !== 'peek') return err('La ronda ya ha empezado');
-      p.ready = true;
-      events.push({ t: 'ready', p: pi });
-      if (st.players.every(q => q.ready)) {
-        st.phase = 'play';
-        events.push({ t: 'start' }, { t: 'turn', p: st.turn });
-      }
-      return okEv(events);
-    }
-
-    // --- Turno: robar, coger del descarte o cantar Cabo ---
+    // --- Turno: robar, coger del descarte o cantar Capo ---
     case 'draw': {
       if (!myTurn || st.step !== 'draw') return err('Ahora no puedes robar');
       const c = drawFromDeck(st, events);
@@ -187,8 +180,8 @@ export function act(st, pi, a) {
       return okEv(events);
     }
     case 'cabo': {
-      if (!myTurn || st.step !== 'draw') return err('Solo puedes cantar Cabo al empezar tu turno');
-      if (st.caboBy !== null) return err('Ya se ha cantado Cabo');
+      if (!myTurn || st.step !== 'draw') return err('Solo puedes cantar Capo al empezar tu turno');
+      if (st.caboBy !== null) return err('Ya se ha cantado Capo');
       st.caboBy = pi;
       st.turnsLeft = st.players.length - 1;
       events.push({ t: 'cabo', p: pi });
@@ -252,7 +245,7 @@ export function act(st, pi, a) {
       if (!validSlot(p, a.slot)) return err('Elige una de tus cartas');
       const tp = a.tp, q = st.players[tp];
       if (!q || tp === pi) return err('Elige una carta de otro jugador');
-      if (tp === st.caboBy) return err('Las cartas de quien ha cantado Cabo no se tocan');
+      if (tp === st.caboBy) return err('Las cartas de quien ha cantado Capo no se tocan');
       if (!validSlot(q, a.tslot)) return err('Esa carta no existe');
       if (type === 11) {
         [p.hand[a.slot], q.hand[a.tslot]] = [q.hand[a.tslot], p.hand[a.slot]];
@@ -281,7 +274,7 @@ export function act(st, pi, a) {
     // --- Echar una carta igual a la del descarte (cualquiera, el más rápido) ---
     case 'match': {
       if (st.phase !== 'play') return err('Ahora no se puede echar');
-      if (pi === st.caboBy) return err('Has cantado Cabo: tus cartas ya no se mueven');
+      if (pi === st.caboBy) return err('Has cantado Capo: tus cartas ya no se mueven');
       if (st.matchRank === null) return err('Llegas tarde: ya lo ha echado otro');
       if (!validSlot(p, a.slot)) return err('Esa carta no existe');
       const c = p.hand[a.slot];
@@ -301,7 +294,7 @@ export function act(st, pi, a) {
 
     // --- Recolocar tus cartas (los demás ven que las mueves) ---
     case 'move': {
-      if (st.phase !== 'play' && st.phase !== 'peek') return err('Ahora no puedes mover cartas');
+      if (st.phase !== 'play') return err('Ahora no puedes mover cartas');
       if (myTurn && st.step === 'power') return err('Termina primero el poder');
       const { from, to } = a;
       const ok = i => Number.isInteger(i) && i >= 0 && i < p.hand.length;
@@ -313,12 +306,7 @@ export function act(st, pi, a) {
 
     // --- El anfitrión salta el turno de alguien que no responde ---
     case 'forceSkip': {
-      if (st.phase === 'peek') {
-        st.players.forEach(q => { q.ready = true; });
-        st.phase = 'play';
-        events.push({ t: 'start' }, { t: 'turn', p: st.turn });
-        return okEv(events);
-      }
+      if (st.phase === 'peek') return okEv(beginPlay(st));
       if (st.phase !== 'play') return err('No hay turno que saltar');
       if (st.step === 'hold') {
         st.discard.push(st.held.card);
@@ -344,7 +332,7 @@ export function viewFor(st, pi) {
     turn: st.turn,
     step: st.step,
     players: st.players.map(p => ({
-      id: p.id, name: p.name, avatar: p.avatar, color: p.color, total: p.total, ready: p.ready, peeks: p.peeks,
+      id: p.id, name: p.name, avatar: p.avatar, color: p.color, total: p.total,
       hand: p.hand.map(c => (c ? (reveal ? c : 1) : 0)),
     })),
     deckCount: st.deck.length,

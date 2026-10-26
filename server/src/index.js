@@ -1,11 +1,16 @@
 // Servidor del Capo en Cloudflare: una "sala" (Durable Object) por código de partida.
 // La sala guarda el estado, reparte, comprueba las jugadas y manda a cada uno solo lo que puede ver.
 import { DurableObject } from 'cloudflare:workers';
-import { newGame, startRound, act, viewFor, eventFor, MAX_PLAYERS, DEFAULTS } from './engine.js';
+import { newGame, startRound, beginPlay, act, viewFor, eventFor, MAX_PLAYERS, DEFAULTS } from './engine.js';
 
-const ALLOWED = [/^https:\/\/dongumer\.github\.io$/, /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/];
+const ALLOWED = [
+  /^https:\/\/dongumer\.github\.io$/,
+  /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/,
+  /^http:\/\/(192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/, // pruebas por la wifi de casa
+];
 const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; // sin I ni O para no confundir
 const ROOM_TTL = 1000 * 60 * 60 * 24; // una sala sin movimiento se borra a las 24 h
+const PEEK_MS = 2200; // tiempo que se ven las dos cartas de abajo al repartir
 
 const okOrigin = o => !o || ALLOWED.some(r => r.test(o));
 const cors = o => ({ 'Access-Control-Allow-Origin': o || '*', 'Content-Type': 'application/json' });
@@ -55,11 +60,30 @@ export class Room extends DurableObject {
   async save() {
     this.s.touched = Date.now();
     await this.ctx.storage.put('s', this.s);
-    await this.ctx.storage.setAlarm(Date.now() + ROOM_TTL);
+    // La alarma sirve para dos cosas: empezar a jugar tras el vistazo inicial y borrar salas viejas.
+    const g = this.s.game;
+    await this.ctx.storage.setAlarm(g && g.phase === 'peek' && this.s.peekAt ? this.s.peekAt : Date.now() + ROOM_TTL);
+  }
+
+  // Al repartir, se dejan unos segundos para la animación y para ver las dos cartas de abajo.
+  async deal() {
+    const ev = startRound(this.s.game);
+    this.s.peekAt = Date.now() + 1300 + 280 * this.s.game.players.length + PEEK_MS;
+    await this.save();
+    this.broadcast(ev);
   }
 
   async alarm() {
-    if (this.s && Date.now() - (this.s.touched || 0) < ROOM_TTL) return;
+    const g = this.s && this.s.game;
+    if (g && g.phase === 'peek' && this.s.peekAt) {
+      if (Date.now() < this.s.peekAt - 50) { await this.ctx.storage.setAlarm(this.s.peekAt); return; }
+      const ev = beginPlay(g);
+      this.s.peekAt = null;
+      await this.save();
+      this.broadcast(ev);
+      return;
+    }
+    if (this.s && Date.now() - (this.s.touched || 0) < ROOM_TTL) { await this.ctx.storage.setAlarm((this.s.touched || 0) + ROOM_TTL); return; }
     for (const ws of this.ctx.getWebSockets()) ws.close(4000, 'Sala cerrada');
     await this.ctx.storage.deleteAll();
     this.s = null;
@@ -177,17 +201,13 @@ export class Room extends DurableObject {
         if (this.s.game && this.s.game.phase !== 'gameEnd') return;
         if (this.s.lobby.length < 2) return reply('Hacen falta al menos 2 jugadores');
         this.s.game = newGame(this.s.lobby, this.s.settings);
-        const ev = startRound(this.s.game);
-        await this.save();
-        this.broadcast(ev);
+        await this.deal();
         return;
       }
       case 'nextRound': {
         const g = this.s.game;
         if (!g || g.phase !== 'roundEnd') return;
-        const ev = startRound(g);
-        await this.save();
-        this.broadcast(ev);
+        await this.deal();
         return;
       }
       case 'toLobby':
