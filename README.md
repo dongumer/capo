@@ -8,6 +8,7 @@ El Cabo con las reglas de casa, para jugar con amigos cada uno desde su móvil.
   - `npm run dev`: servidor local en http://127.0.0.1:8787.
   - `node test/net.mjs`: partida completa de 3 bots contra el servidor local.
   - `node test/leave.mjs URL`: jugadores que se van o pierden la conexión (servidor con `--var AWAY_MS:3000`).
+  - `node test/consumo.mjs URL`: mide lo que gasta del cupo gratuito una partida de 4 jugadores y 5 rondas.
   - `node test/bots.mjs CODIGO 3`: 3 bots que se unen a una sala para probar la web.
   - `npm run deploy`: publica el servidor en Cloudflare.
 
@@ -25,3 +26,7 @@ El Cabo con las reglas de casa, para jugar con amigos cada uno desde su móvil.
 ## Probar en casa
 
 Doble clic en `probar-en-casa.bat`: arranca el servidor y la web en este PC. En la sala sale "Añadir jugador de prueba" para jugar contra bots. Desde el móvil, con la misma wifi, abre la dirección que enseña la ventana.
+
+## Cupo gratuito de Cloudflare
+
+Medido el 27-10-2026 con `test/consumo.mjs` contra el servidor publicado: una partida de 4 jugadores y 5 rondas gasta unas 440 escrituras (el límite más ajustado: 100.000 al día), unas 25 peticiones a las salas y 4 al Worker. Da para unas **220 partidas así al día**, entre todos los que jueguen. El cupo se renueva a medianoche UTC; si se acaba, la web enseña «Límite de partidas alcanzado en el servidor».
