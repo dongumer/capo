@@ -321,7 +321,7 @@ export class Room extends DurableObject {
     let m;
     try { m = JSON.parse(raw); } catch { return; }
     const isHost = pid === this.s.host;
-    const reply = error => ws.send(JSON.stringify({ type: 'error', error }));
+    const reply = (error, code) => ws.send(JSON.stringify({ type: 'error', error, code }));
 
     switch (m.a) {
       case 'ping': // normalmente lo contesta la respuesta automática sin llegar aquí
@@ -381,7 +381,7 @@ export class Room extends DurableObject {
     const pi = g.players.findIndex(p => p.id === pid);
     if (m.a === 'forceSkip' && !isHost) return reply('Solo quien creó la partida puede saltar turnos');
     const res = act(g, pi, m);
-    if (!res.ok) return reply(res.error);
+    if (!res.ok) return reply(res.error, res.code);
     this.timeCountdown(res.events);
     await this.save();
     this.broadcast(res.events);

@@ -184,6 +184,8 @@ h2 { margin: 0; font-family: var(--display); font-weight: 800; font-size: 24px; 
 .card.pick .face { box-shadow: 0 0 0 6px var(--gold), 0 0 26px 6px rgba(226,172,47,.75); animation: pulse 1.1s ease-in-out infinite; }
 .card.sel .face { box-shadow: 0 0 0 7px #fff, 0 0 30px 8px rgba(255,255,255,.8); animation: none; }
 .card.dragging { opacity: .25; }
+.card.hot .face { box-shadow: 0 0 0 6px #ff5a4a, 0 0 26px 8px rgba(255,90,74,.85); animation: hot 1s ease-in-out infinite; }
+@keyframes hot { 50% { box-shadow: 0 0 0 3px #ff5a4a, 0 0 10px 2px rgba(255,90,74,.5); } }
 @keyframes pulse { 50% { box-shadow: 0 0 0 4px var(--gold), 0 0 12px 2px rgba(226,172,47,.4); } }
 .zone { position: absolute; border-radius: 18px; }
 .zone[data-zone="discard"] { border: 3px dashed rgba(255,255,255,.18); }
@@ -675,7 +677,10 @@ function connect(code) {
     if (m.type === 'pong') return;
     if (m.type === 'limit') return showLimit();
     if (m.type === 'fatal') { S.closing = true; store.del('room'); toast(m.error, true); S.msg = null; S.V = null; show('home'); history.replaceState(null, '', location.pathname + (SUF ? '?yo=' + params.get('yo') : '')); return; }
-    if (m.type === 'error') { toast(m.error, true); sfx.bad(); return; }
+    if (m.type === 'error') {
+      if (m.code === 'stale') { S.sel = {}; render(); toast(m.error); sfx.pop(); return; } // no es un fallo tuyo: se avisa sin alarma
+      toast(m.error, true); sfx.bad(); return;
+    }
     if (m.type === 'state') { S.queue.push(m); pump(); if (m.notice) setTimeout(() => toast(m.notice), 400); }
   };
   ws.onclose = e => {
@@ -715,12 +720,17 @@ async function pump() {
       S.V = m.view;
       if (!m.view) { S.reveal = {}; S.sel = {}; renderLobby(); show('lobby'); continue; }
       if (document.getElementById('game').hidden) show('game');
-      if (!old || old.round !== m.view.round || m.events.some(e => e.t === 'deal')) { S.reveal = {}; S.peekSince = Date.now(); hideBig(); }
+      if (!old || old.round !== m.view.round || m.events.some(e => e.t === 'deal')) { S.reveal = {}; S.hot = {}; S.peekSince = Date.now(); hideBig(); }
       clearStaleSelection();
+      noticeExchanges(m.view);
       render();
       const fast = S.queue.length > 2;
       S.msgT0 = Date.now();
-      for (const ev of m.events) await animate(ev, old || m.view, m.view, fast);
+      const t0 = Date.now();
+      for (const ev of m.events) {
+        if (Date.now() - t0 > 9000) break; // vigilante: nunca se deja la pantalla atrás por una animación
+        await Promise.race([animate(ev, old || m.view, m.view, fast), sleep(6000)]);
+      }
       render();
     }
   } catch (err) { console.error(err); render(); }
@@ -774,7 +784,8 @@ function slotPos(V, p, slot) {
   const h = handCenter(V, p), len = V.players[p].hand.length;
   const cols = Math.max(2, Math.ceil(len / 2)), col = Math.floor(slot / 2), row = slot % 2;
   const gx = 140 * h.s + 10, gy = 200 * h.s + 10;
-  const lx = (col - (cols - 1) / 2) * gx, ly = (row - .5) * gy;
+  // Las dos primeras columnas no se mueven nunca: si llega una carta de castigo, la nueva columna sale por la derecha
+  const lx = (col - .5) * gx, ly = (row - .5) * gy;
   const rad = h.r * Math.PI / 180;
   return { x: h.x + lx * Math.cos(rad) - ly * Math.sin(rad), y: h.y + lx * Math.sin(rad) + ly * Math.cos(rad), r: h.r, s: h.s };
 }
@@ -803,6 +814,27 @@ function makeCard(card, up) {
 const keyOf = (p, s) => `h${p}_${s}`;
 const elByKey = k => items.querySelector(`[data-key="${k}"]`);
 
+const myVer = () => (S.V ? S.V.players[S.V.me].ver : undefined);
+
+// Avisa (y marca la carta) cuando otro jugador te cambia una carta. Sale del estado que manda el servidor,
+// no de la animación: así llega aunque tu móvil fuera retrasado o te hubieras desconectado un rato.
+S.hot = {};
+function noticeExchanges(V) {
+  const mine = V.players[V.me].xch || [];
+  if (!mine.length) return;
+  const key = 'xch.' + S.code;
+  if (S.xchSeen === undefined) S.xchSeen = store.get(key, 0);
+  const top = Math.max(...mine.map(x => x.n));
+  if (top < S.xchSeen) S.xchSeen = 0; // partida nueva
+  const fresh = mine.filter(x => x.n > S.xchSeen);
+  if (!fresh.length) return;
+  S.xchSeen = top; store.set(key, top);
+  const until = Date.now() + 9000;
+  for (const x of fresh) S.hot[x.slot] = until;
+  const who = [...new Set(fresh.map(x => V.players[x.by].name))].join(' y ');
+  setTimeout(() => toast(`${who} te ${fresh.length > 1 ? 'ha cambiado cartas' : 'ha cambiado una carta'}: ${fresh.length > 1 ? 'las marcadas en rojo' : 'la marcada en rojo'}`, true), 600);
+  setTimeout(() => { if (S.V) render(); }, 9100);
+}
 function myHandIdx(V) { return V.players[V.me].hand.map((h, i) => (h ? i : -1)).filter(i => i >= 0); }
 
 // Qué se puede tocar ahora mismo
@@ -874,6 +906,7 @@ function render() {
         el.dataset.mine = '1';
         if (it.mine) el.classList.add('pick');
         if (S.sel.own === si) el.classList.add('sel');
+        if (S.hot[si] > now) el.classList.add('hot');
       } else if (it.others) {
         el.classList.add('pick');
       }
@@ -1053,14 +1086,15 @@ function flyer(card, from, to, { up0 = false, up1 = false, dur = 460, lift = 70 
   const mid = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2, z: Math.max(from.z || 0, to.z || 0) + lift, r: ((from.r || 0) + (to.r || 0)) / 2, s: Math.max(from.s, to.s) * 1.05 };
   const a = el.animate([{ transform: tf(from) }, { transform: tf(mid) }, { transform: tf(to) }], { duration: dur, easing: 'cubic-bezier(.35,.75,.3,1)', fill: 'forwards' });
   if (up0 !== up1) setTimeout(() => el.classList.toggle('up', up1), dur * .2);
-  return a.finished.then(() => el.remove());
+  // Si el navegador no termina la animación (app en segundo plano, pantalla bloqueada…), la carta se quita igual
+  return Promise.race([a.finished.catch(() => {}), sleep(dur + 700)]).then(() => { try { a.cancel(); } catch {} el.remove(); });
 }
 function hideKeys(keys) { const els = keys.map(elByKey).filter(Boolean); els.forEach(e => e.classList.add('hide')); return () => els.forEach(e => e.classList.remove('hide')); }
 async function liftCard(key, ms = 900) {
   const el = elByKey(key); if (!el) return;
   const base = el.style.transform;
   const t = el.animate([{ transform: base }, { transform: base + ' translateZ(0) rotateX(-35deg) translateY(-30px)' }, { transform: base + ' translateZ(0) rotateX(-35deg) translateY(-30px)' }, { transform: base }], { duration: ms, easing: 'ease-in-out' });
-  return t.finished.catch(() => {});
+  return Promise.race([t.finished.catch(() => {}), sleep(ms + 700)]);
 }
 function screenPosOfSeat(V, p) {
   if (p === V.me) { const r = $('#mePlate').getBoundingClientRect(); return { x: r.left + 30, y: r.top }; }
@@ -1209,8 +1243,7 @@ async function animate(ev, O, N, fast) {
         flyer(null, slotPos(O, ev.tp, ev.tslot), slotPos(N, ev.p, ev.slot), { lift: 140, dur: 650 }),
       ]);
       un();
-      if (ev.tp === me) toast(`${who(ev.p)} te ha cambiado una carta`);
-      else if (ev.p !== me) toast(`${who(ev.p)} cambia una carta con ${who(ev.tp)}`);
+      if (ev.tp !== me && ev.p !== me) toast(`${who(ev.p)} cambia una carta con ${who(ev.tp)}`);
       break;
     }
     case 'look': {
@@ -1227,6 +1260,7 @@ async function animate(ev, O, N, fast) {
       break;
     }
     case 'keep':
+      if (ev.why === 'gone' && ev.p === me) toast('Esa carta ya no estaba donde la viste (alguien la echó): no se ha cambiado nada', true);
       hideBig();
       for (const k in S.reveal) if (S.reveal[k].look) delete S.reveal[k];
       render();
@@ -1367,8 +1401,8 @@ addEventListener('pointerup', e => {
   if (!t || !S.V) return;
   if (t.zone) {
     if (S.V.phase !== 'play') return toast('Todavía no se puede echar', true);
-    send({ a: 'match', slot: d.slot });
-  } else send({ a: 'move', from: d.slot, to: t.slot });
+    send({ a: 'match', slot: d.slot, v: myVer() });
+  } else send({ a: 'move', from: d.slot, to: t.slot, v: myVer() });
 });
 addEventListener('pointercancel', endDrag);
 // Solo cuenta si se pierde el enganche que pusimos en #game. En pantallas táctiles, al
@@ -1391,15 +1425,15 @@ items.addEventListener('click', e => {
   if (!c || c.dataset.p == null) return;
   const p = +c.dataset.p, slot = +c.dataset.slot;
   if (V.phase !== 'play' || V.turn !== V.me) return;
-  if (V.step === 'hold' && p === V.me) return send({ a: 'swap', slot });
+  if (V.step === 'hold' && p === V.me) return send({ a: 'swap', slot, v: myVer() });
   if (V.step === 'power') {
     const pw = V.power;
-    if (pw.type === 10 && p === V.me) return send({ a: 'p10', slot });
+    if (pw.type === 10 && p === V.me) return send({ a: 'p10', slot, v: myVer() });
     if ((pw.type === 11 || pw.type === 12) && pw.stage === 'pick') {
       if (p === V.me) S.sel.own = S.sel.own === slot ? null : slot;
       else { if (S.sel.tp === p && S.sel.tslot === slot) { S.sel.tp = S.sel.tslot = null; } else { S.sel.tp = p; S.sel.tslot = slot; } }
       sfx.pop();
-      if (S.sel.own != null && S.sel.tp != null) { send({ a: 'p' + pw.type, slot: S.sel.own, tp: S.sel.tp, tslot: S.sel.tslot }); }
+      if (S.sel.own != null && S.sel.tp != null) { send({ a: 'p' + pw.type, slot: S.sel.own, tp: S.sel.tp, tslot: S.sel.tslot, v: myVer(), tv: V.players[S.sel.tp].ver }); }
       render();
     }
   }

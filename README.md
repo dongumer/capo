@@ -9,6 +9,7 @@ El Cabo con las reglas de casa, para jugar con amigos cada uno desde su móvil.
   - `node test/net.mjs`: partida completa de 3 bots contra el servidor local.
   - `node test/leave.mjs URL`: jugadores que se van o pierden la conexión (servidor con `--var AWAY_MS:3000`).
   - `node test/consumo.mjs URL`: mide lo que gasta del cupo gratuito una partida de 4 jugadores y 5 rondas.
+  - `node test/manos.mjs`: auditoría de las manos; sigue cada carta durante ~170.000 jugadas al azar y comprueba que solo cambia por una acción que lo permita.
   - `node test/bots.mjs CODIGO 3`: 3 bots que se unen a una sala para probar la web.
   - `npm run deploy`: publica el servidor en Cloudflare.
 

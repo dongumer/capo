@@ -12,6 +12,9 @@
 //   Tras el último turno hay unos segundos para echar antes de destapar.
 //   Quien menos sume gana la ronda: +1.
 //   Se juega hasta que queráis; gana quien más rondas haya ganado.
+// - Cada mano tiene un contador (ver) que sube cada vez que algo cambia en ella. Las acciones que eligen
+//   cartas por su posición lo mandan, y si no coincide se rechazan: así nunca se toca una carta distinta
+//   de la que se vio en pantalla. El rey recuerda las cartas por su identidad, no por su posición.
 // - Quien se va (o pasa mucho rato sin conexión) deja de estar en la partida: sus cartas vuelven
 //   al mazo y se salta su turno. Quien está sin conexión no hace esperar a los demás para empezar.
 
@@ -47,7 +50,8 @@ export function newGame(players, settings = {}) {
     phase: 'peek',
     round: 0,
     starter: rnd(players.length),
-    players: players.map(p => ({ id: p.id, name: p.name, avatar: p.avatar, color: p.color, total: 0, hand: [], ready: false, left: false, away: false })),
+    players: players.map(p => ({ id: p.id, name: p.name, avatar: p.avatar, color: p.color, total: 0, hand: [], ready: false, left: false, away: false, ver: 0, xch: [] })),
+    xchN: 0,
     deck: [], discard: [],
     turn: 0, step: 'draw', held: null, power: null,
     caboBy: null, turnsLeft: 0, matchRank: null,
@@ -73,6 +77,7 @@ export function startRound(st) {
   for (const p of st.players) {
     p.hand = p.left ? [] : [st.deck.pop(), st.deck.pop(), st.deck.pop(), st.deck.pop()];
     p.ready = p.left;
+    p.ver++; p.xch = [];
   }
   if (st.round > 1) st.starter = nextActive(st, st.starter);
   else if (st.players[st.starter].left) st.starter = nextActive(st, st.starter);
@@ -108,7 +113,12 @@ export function beginPlay(st) {
   return [{ t: 'start' }, { t: 'turn', p: st.turn }];
 }
 
-const err = msg => ({ ok: false, error: msg, events: [] });
+const err = (msg, code) => ({ ok: false, error: msg, code, events: [] });
+const bump = p => { p.ver++; };
+const sameCard = (a, b) => a && b && a.s === b.s && a.r === b.r;
+// Quedan anotados en la mano del que sufre un cambio, para avisarle aunque no esté mirando
+function noteExchange(st, victim, by, slot) { victim.xch = victim.xch.concat({ n: ++st.xchN, by, slot }).slice(-3); }
+const SLOT_ACTIONS = new Set(['swap', 'match', 'move', 'p10', 'p11', 'p12']);
 const okEv = events => ({ ok: true, events });
 
 function drawFromDeck(st, events) {
@@ -165,6 +175,7 @@ export function leaveGame(st, pi) {
   if (wasTurn && st.held) cards.push(st.held.card);
   st.deck = shuffle(cards).concat(st.deck);
   p.hand = [];
+  bump(p);
   p.left = true;
   p.ready = true;
   events.push({ t: 'left', p: pi });
@@ -247,6 +258,12 @@ export function act(st, pi, a) {
   const p = st.players[pi];
   if (!p || !a) return err('Acción no válida');
   if (p.left) return err('Ya no estás en esta partida');
+  // Si la mano ha cambiado desde que se vio la pantalla en la que se eligió la carta, se rechaza
+  if (SLOT_ACTIONS.has(a.a) && a.v !== undefined && a.v !== p.ver) return err('Tus cartas acaban de cambiar. Vuelve a elegir.', 'stale');
+  if ((a.a === 'p11' || a.a === 'p12') && a.tv !== undefined) {
+    const t = st.players[a.tp];
+    if (t && a.tv !== t.ver) return err('Las cartas de ese jugador acaban de cambiar. Vuelve a elegir.', 'stale');
+  }
   const events = [];
   const myTurn = st.turn === pi && st.phase === 'play';
 
@@ -289,6 +306,7 @@ export function act(st, pi, a) {
       const inc = st.held.card;
       const from = st.held.from;
       p.hand[a.slot] = inc;
+      bump(p);
       st.discard.push(out);
       st.matchRank = out.r;
       events.push({ t: 'swap', p: pi, slot: a.slot, out, from, ...(from === 'discard' ? { inc } : { priv: { to: pi, inc } }) });
@@ -344,23 +362,29 @@ export function act(st, pi, a) {
       if (!validSlot(q, a.tslot)) return err('Esa carta no existe');
       if (type === 11) {
         [p.hand[a.slot], q.hand[a.tslot]] = [q.hand[a.tslot], p.hand[a.slot]];
+        bump(p); bump(q); noteExchange(st, q, pi, a.tslot);
         events.push({ t: 'exchange', p: pi, slot: a.slot, tp, tslot: a.tslot, blind: true });
         endTurn(st, events);
       } else {
-        st.power = { type, stage: 'decide', own: a.slot, tp, tslot: a.tslot };
+        // Se guardan las cartas vistas (no solo su sitio): el dueño puede recolocarlas antes de que se decida
+        st.power = { type, stage: 'decide', own: a.slot, tp, tslot: a.tslot, ownCard: p.hand[a.slot], theirCard: q.hand[a.tslot] };
         events.push({ t: 'look', p: pi, slot: a.slot, tp, tslot: a.tslot, priv: { to: pi, mine: p.hand[a.slot], theirs: q.hand[a.tslot] } });
       }
       return okEv(events);
     }
     case 'p12swap': {
       if (!myTurn || st.step !== 'power' || st.power.type !== 12 || st.power.stage !== 'decide') return err('No puedes hacer eso ahora');
-      const { own, tp, tslot } = st.power;
+      const { ownCard, theirCard, tp } = st.power;
       const q = st.players[tp];
-      if (a.yes && validSlot(p, own) && validSlot(q, tslot)) {
+      // Dónde están ahora las dos cartas que se vieron
+      const own = p.hand.findIndex(c => sameCard(c, ownCard));
+      const tslot = q.hand.findIndex(c => sameCard(c, theirCard));
+      if (a.yes && own >= 0 && tslot >= 0) {
         [p.hand[own], q.hand[tslot]] = [q.hand[tslot], p.hand[own]];
+        bump(p); bump(q); noteExchange(st, q, pi, tslot);
         events.push({ t: 'exchange', p: pi, slot: own, tp, tslot, blind: false });
       } else {
-        events.push({ t: 'keep', p: pi });
+        events.push({ t: 'keep', p: pi, why: a.yes ? 'gone' : 'no' });
       }
       endTurn(st, events);
       return okEv(events);
@@ -372,6 +396,7 @@ export function act(st, pi, a) {
       if (st.matchRank === null) return err('Llegas tarde: ya lo ha echado otro');
       if (!validSlot(p, a.slot)) return err('Esa carta no existe');
       const c = p.hand[a.slot];
+      bump(p);
       if (c.r === st.matchRank) {
         p.hand[a.slot] = null;
         st.discard.push(c);
@@ -394,6 +419,7 @@ export function act(st, pi, a) {
       const ok = i => Number.isInteger(i) && i >= 0 && i < p.hand.length;
       if (!ok(from) || !ok(to) || from === to) return err('Movimiento no válido');
       [p.hand[from], p.hand[to]] = [p.hand[to], p.hand[from]];
+      bump(p);
       events.push({ t: 'move', p: pi, from, to });
       return okEv(events);
     }
@@ -428,13 +454,15 @@ export function viewFor(st, pi) {
     turn: st.turn,
     step: st.step,
     players: st.players.map(p => ({
-      id: p.id, name: p.name, avatar: p.avatar, color: p.color, total: p.total, ready: p.ready, left: p.left, away: p.away,
+      id: p.id, name: p.name, avatar: p.avatar, color: p.color, total: p.total, ready: p.ready, left: p.left, away: p.away, ver: p.ver,
       hand: p.hand.map(c => (c ? (reveal ? c : 1) : 0)),
     })),
     deckCount: st.deck.length,
     discard: st.discard.slice(-3),
     held: st.held ? { from: st.held.from, card: st.held.from === 'discard' || st.turn === pi ? st.held.card : null } : null,
-    power: st.power,
+    // sin las cartas que se han visto con el rey: eso solo lo sabe quien las miró
+    power: st.power ? { type: st.power.type, stage: st.power.stage, own: st.power.own, tp: st.power.tp, tslot: st.power.tslot } : null,
+    xch: st.players[pi] ? st.players[pi].xch : [],
     caboBy: st.caboBy,
     turnsLeft: st.turnsLeft,
     matchRank: st.matchRank,

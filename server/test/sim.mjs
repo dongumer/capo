@@ -261,6 +261,61 @@ for (let g = 0; g < 400; g++) {
   console.log('✓ a quien canta Capo le pueden cambiar cartas');
 }
 
+// Las cartas no cambian "por sorpresa": si tu mano cambió desde que viste la pantalla, la acción se rechaza
+{
+  const st = newGame([{ id: 'a' }, { id: 'b' }, { id: 'c' }]);
+  startRound(st); st.phase = 'play'; st.turn = 0;
+  const A = st.players[0], B = st.players[1];
+  const verA = A.ver, verB = B.ver;
+  st.deck.push({ s: 'o', r: 11 });
+  act(st, 0, { a: 'draw' }); act(st, 0, { a: 'discard' });          // A usa el caballo...
+  // ...pero B, que había visto su pantalla antes, estaba a punto de tocar una carta suya
+  let r = act(st, 0, { a: 'p11', slot: 0, tp: 1, tslot: 2, v: verA, tv: verB });
+  assert.ok(r.ok, r.error);
+  assert.notEqual(B.ver, verB, 'el caballo debe cambiar el contador de la mano de B');
+  const antes = JSON.stringify(st.players.map(p => p.hand));
+  r = act(st, 1, { a: 'move', from: 2, to: 3, v: verB }); // B toca con la pantalla vieja
+  assert.equal(r.ok, false); assert.equal(r.code, 'stale');
+  r = act(st, 1, { a: 'match', slot: 2, v: verB });
+  assert.equal(r.ok, false); assert.equal(r.code, 'stale');
+  assert.equal(JSON.stringify(st.players.map(p => p.hand)), antes, 'una acción rechazada no debe tocar nada');
+  r = act(st, 1, { a: 'move', from: 2, to: 3, v: B.ver }); // con la pantalla al día, sí
+  assert.ok(r.ok, r.error);
+  // y quien elige una carta de otro con la mano de ese otro ya cambiada también se rechaza
+  const s2 = newGame([{ id: 'a' }, { id: 'b' }]);
+  startRound(s2); s2.phase = 'play'; s2.turn = 0; s2.deck.push({ s: 'c', r: 11 });
+  const tv = s2.players[1].ver;
+  act(s2, 1, { a: 'move', from: 0, to: 1 });
+  act(s2, 0, { a: 'draw' }); act(s2, 0, { a: 'discard' });
+  r = act(s2, 0, { a: 'p11', slot: 0, tp: 1, tslot: 0, v: s2.players[0].ver, tv });
+  assert.equal(r.ok, false); assert.equal(r.code, 'stale');
+  console.log('✓ si tu mano (o la del otro) ha cambiado desde que viste la pantalla, la acción se rechaza sin tocar nada');
+}
+
+// El rey cambia las cartas que se VIERON aunque su dueño las recoloque antes de decidir; y no filtra cuáles eran
+{
+  const st = newGame([{ id: 'a' }, { id: 'b' }, { id: 'c' }]);
+  startRound(st); st.phase = 'play'; st.turn = 0;
+  st.players[0].hand = [{ s: 'o', r: 1 }, { s: 'o', r: 2 }, { s: 'o', r: 3 }, { s: 'o', r: 4 }];
+  st.players[1].hand = [{ s: 'c', r: 5 }, { s: 'c', r: 6 }, { s: 'c', r: 7 }, { s: 'c', r: 1 }];
+  st.deck.push({ s: 'e', r: 12 });
+  act(st, 0, { a: 'draw' }); act(st, 0, { a: 'discard' });
+  act(st, 0, { a: 'p12', slot: 1, tp: 1, tslot: 2 });              // A mira su 2 de oros y el 7 de copas de B
+  assert.equal(st.power.stage, 'decide');
+  for (let i = 0; i < 3; i++) assert.ok(!JSON.stringify(viewFor(st, i)).includes('theirCard') && !JSON.stringify(viewFor(st, i)).includes('ownCard'), 'la vista no debe enseñar las cartas vistas');
+  act(st, 1, { a: 'move', from: 2, to: 0 });                       // B recoloca: el 7 pasa al hueco 0
+  const r = act(st, 0, { a: 'p12swap', yes: true });
+  assert.ok(r.ok, r.error);
+  assert.deepEqual(st.players[0].hand[1], { s: 'c', r: 7 });       // A se queda con el 7 que vio
+  assert.deepEqual(st.players[1].hand[0], { s: 'o', r: 2 });       // y B con el 2 de A, donde estuviera el 7
+  assert.equal(r.events.find(e => e.t === 'exchange').tslot, 0);
+  // B ha sufrido un cambio y queda anotado solo en SU vista
+  assert.equal(viewFor(st, 1).xch.length, 1);
+  assert.equal(viewFor(st, 1).xch[0].slot, 0);
+  assert.equal(viewFor(st, 2).xch.length, 0);
+  console.log('✓ el rey cambia las cartas vistas aunque se muevan; al que sufre el cambio le queda anotado');
+}
+
 console.log(`Últimas oportunidades: ${closings}`);
 console.log(`Se van ${leaves}, desconexiones ${aways}, se quedan solos ${alones}`);
 console.log(`OK: ${games} partidas, ${rounds} rondas, ${actions} acciones, ${cabos} cabos, echadas buenas ${matchesOk} / malas ${matchesBad}`);
