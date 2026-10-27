@@ -21,6 +21,10 @@ const cors = o => ({ 'Access-Control-Allow-Origin': o || '*', 'Content-Type': 'a
 const json = (data, o, status = 200) => new Response(JSON.stringify(data), { status, headers: cors(o) });
 const clean = (s, n) => String(s || '').replace(/[<>&"]/g, '').trim().slice(0, n);
 
+// El plan gratuito de Cloudflare tiene un cupo diario. Cuando se acaba, sus operaciones fallan con un error así.
+const isLimit = e => /exceeded|free tier|limit|quota|1027/i.test(String((e && e.message) || e));
+class LimitError extends Error { constructor() { super('Exceeded free tier limit'); } }
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
@@ -28,37 +32,79 @@ export default {
     if (!okOrigin(origin)) return new Response('Origen no permitido', { status: 403 });
     if (req.method === 'OPTIONS') return new Response(null, { headers: { ...cors(origin), 'Access-Control-Allow-Methods': 'GET', 'Access-Control-Allow-Headers': '*' } });
 
-    // Crear partida: busca un código libre y lo reserva para quien la crea.
-    if (url.pathname === '/api/new') {
-      const pid = clean(url.searchParams.get('pid'), 40);
-      if (!pid) return json({ error: 'Falta el jugador' }, origin, 400);
-      for (let i = 0; i < 8; i++) {
-        let code = '';
-        for (let k = 0; k < 4; k++) code += LETTERS[Math.floor(Math.random() * LETTERS.length)];
-        const stub = env.ROOMS.get(env.ROOMS.idFromName(code));
-        const r = await stub.claim(code, pid);
-        if (r) return json({ code }, origin);
-      }
-      return json({ error: 'No se pudo crear la partida, prueba otra vez' }, origin, 503);
+    try {
+      return await route(req, env, url, origin);
+    } catch (e) {
+      if (isLimit(e)) return json({ error: 'limit' }, origin, 429);
+      throw e;
     }
-
-    // Entrar en una sala: /api/room/ABCD?pid=..&name=..&avatar=..&color=..
-    const m = url.pathname.match(/^\/api\/room\/([A-Z]{4})$/);
-    if (m) {
-      if (req.headers.get('Upgrade') !== 'websocket') return json({ error: 'Se esperaba WebSocket' }, origin, 426);
-      const stub = env.ROOMS.get(env.ROOMS.idFromName(m[1]));
-      return stub.fetch(req);
-    }
-    return json({ ok: true, name: 'capo' }, origin);
   },
 };
+
+async function route(req, env, url, origin) {
+  // Solo para pruebas: simula que se ha acabado el cupo diario (wrangler dev --var FORCE_LIMIT:1)
+  if (env.FORCE_LIMIT && url.pathname.startsWith('/api/')) return json({ error: 'limit' }, origin, 429);
+
+  // ¿Funciona el servidor? Lo usa la web para saber si se ha acabado el cupo.
+  if (url.pathname === '/api/status') {
+    await env.ROOMS.get(env.ROOMS.idFromName('__estado__')).ping();
+    return json({ ok: true }, origin);
+  }
+
+  // Lo que ha gastado una sala (escrituras, mensajes...). Para medir el consumo.
+  const st = url.pathname.match(/^\/api\/stats\/([A-Z]{4})$/);
+  if (st) return json(await env.ROOMS.get(env.ROOMS.idFromName(st[1])).stats(), origin);
+
+  // Crear partida: busca un código libre y lo reserva para quien la crea.
+  if (url.pathname === '/api/new') {
+    const pid = clean(url.searchParams.get('pid'), 40);
+    if (!pid) return json({ error: 'Falta el jugador' }, origin, 400);
+    for (let i = 0; i < 8; i++) {
+      let code = '';
+      for (let k = 0; k < 4; k++) code += LETTERS[Math.floor(Math.random() * LETTERS.length)];
+      const stub = env.ROOMS.get(env.ROOMS.idFromName(code));
+      const r = await stub.claim(code, pid);
+      if (r) return json({ code }, origin);
+    }
+    return json({ error: 'No se pudo crear la partida, prueba otra vez' }, origin, 503);
+  }
+
+  // Entrar en una sala: /api/room/ABCD?pid=..&name=..&avatar=..&color=..
+  const m = url.pathname.match(/^\/api\/room\/([A-Z]{4})$/);
+  if (m) {
+    if (req.headers.get('Upgrade') !== 'websocket') return json({ error: 'Se esperaba WebSocket' }, origin, 426);
+    const stub = env.ROOMS.get(env.ROOMS.idFromName(m[1]));
+    return stub.fetch(req);
+  }
+  return json({ ok: true, name: 'capo' }, origin);
+}
 
 export class Room extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     ctx.blockConcurrencyWhile(async () => {
       this.s = (await ctx.storage.get('s')) || null;
+      this.alarmAt = await ctx.storage.getAlarm();
     });
+    // Los avisos de «sigo aquí» de los móviles se contestan solos: no despiertan la sala ni gastan cupo
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"a":"ping"}', '{"type":"pong"}'));
+  }
+
+  ping() { return 'ok'; }
+  stats() { return { ...((this.s && this.s.stats) || {}), now: Date.now() }; }
+  count(k, n = 1) { if (this.s) { this.s.stats = this.s.stats || {}; this.s.stats[k] = (this.s.stats[k] || 0) + n; } }
+
+  // Cada setAlarm cuenta como una escritura del cupo diario: solo se cambia cuando hace falta.
+  async setAlarm(at) {
+    if (this.alarmAt && Math.abs(this.alarmAt - at) < 50) return;
+    this.count('alarms');
+    await this.ctx.storage.setAlarm(at);
+    this.alarmAt = at;
+  }
+
+  // Se ha acabado el cupo diario: se avisa a todos los conectados.
+  limitHit() {
+    for (const ws of this.ctx.getWebSockets()) try { ws.send('{"type":"limit"}'); } catch {}
   }
 
   awayMs() { return +(this.env && this.env.AWAY_MS) || AWAY_MS; } // en pruebas se acorta con --var AWAY_MS:3000
@@ -86,9 +132,20 @@ export class Room extends DurableObject {
       this.s.closeAt = this.s.closeAt || Date.now() + CLOSE_MS;
       if (g.matchRank === null) this.s.closeAt = Math.min(this.s.closeAt, Date.now() + 1300);
     } else this.s.closeAt = null;
-    await this.ctx.storage.put('s', this.s);
-    // La alarma sirve también para borrar salas viejas.
-    await this.ctx.storage.setAlarm(this.timerAt() || Date.now() + ROOM_TTL);
+    this.count('puts');
+    try {
+      // Solo para pruebas: simula que se acaba el cupo tras N escrituras (wrangler dev --var LIMIT_AFTER:30)
+      if (this.env && this.env.LIMIT_AFTER && this.s.stats.puts > +this.env.LIMIT_AFTER) throw new Error('Exceeded allowed rows written in Durable Objects free tier (simulado)');
+      await this.ctx.storage.put('s', this.s);
+      // Alarma: el temporizador más cercano de la partida o, si no hay, la limpieza de salas viejas.
+      // Para la limpieza basta con que haya alguna alarma pendiente: al saltar, mira si la sala se ha usado.
+      const timer = this.timerAt();
+      if (timer) await this.setAlarm(timer);
+      else if (!this.alarmAt) await this.setAlarm(Date.now() + ROOM_TTL);
+    } catch (e) {
+      if (isLimit(e)) { this.limitHit(); throw new LimitError(); }
+      throw e;
+    }
   }
 
   // Al repartir se espera a que todos pulsen «Estoy listo».
@@ -117,9 +174,13 @@ export class Room extends DurableObject {
   }
 
   async alarm() {
+    this.alarmAt = null; // la alarma que estaba puesta acaba de saltar
+    try { await this.onAlarm(); } catch (e) { if (!(e instanceof LimitError)) throw e; }
+  }
+  async onAlarm() {
     const at = this.s && this.timerAt();
     if (at) {
-      if (Date.now() < at - 50) { await this.ctx.storage.setAlarm(at); return; }
+      if (Date.now() < at - 50) { await this.setAlarm(at); return; }
       const now = Date.now() + 50;
       let g = this.s.game;
       let ev = [], extra = {};
@@ -136,7 +197,7 @@ export class Room extends DurableObject {
       this.broadcast(this.s.game ? ev : [], extra);
       return;
     }
-    if (this.s && Date.now() - (this.s.touched || 0) < ROOM_TTL) { await this.ctx.storage.setAlarm((this.s.touched || 0) + ROOM_TTL); return; }
+    if (this.s && Date.now() - (this.s.touched || 0) < ROOM_TTL) { await this.setAlarm((this.s.touched || 0) + ROOM_TTL); return; }
     for (const ws of this.ctx.getWebSockets()) ws.close(4000, 'Sala cerrada');
     await this.ctx.storage.deleteAll();
     this.s = null;
@@ -174,6 +235,13 @@ export class Room extends DurableObject {
   }
 
   async fetch(req) {
+    try { return await this.connect(req); }
+    catch (e) {
+      if (e instanceof LimitError || isLimit(e)) return new Response(JSON.stringify({ error: 'limit' }), { status: 429 });
+      throw e;
+    }
+  }
+  async connect(req) {
     const url = new URL(req.url);
     const pid = clean(url.searchParams.get('pid'), 40);
     const pair = new WebSocketPair();
@@ -202,6 +270,7 @@ export class Room extends DurableObject {
       this.s.lobby.push(me);
     }
     if (!this.s.lobby.some(p => p.id === this.s.host)) this.s.host = this.s.lobby[0].id;
+    this.count('conns');
     // Vuelve alguien que estaba sin conexión
     let ev = [];
     const g = this.s.game;
@@ -243,7 +312,11 @@ export class Room extends DurableObject {
   }
 
   async webSocketMessage(ws, raw) {
+    try { await this.onMessage(ws, raw); } catch (e) { if (!(e instanceof LimitError)) throw e; }
+  }
+  async onMessage(ws, raw) {
     if (!this.s) return;
+    this.count('msgs');
     const pid = this.ctx.getTags(ws)[0];
     let m;
     try { m = JSON.parse(raw); } catch { return; }
@@ -251,7 +324,7 @@ export class Room extends DurableObject {
     const reply = error => ws.send(JSON.stringify({ type: 'error', error }));
 
     switch (m.a) {
-      case 'ping':
+      case 'ping': // normalmente lo contesta la respuesta automática sin llegar aquí
         ws.send('{"type":"pong"}');
         return;
       case 'react':
@@ -331,9 +404,9 @@ export class Room extends DurableObject {
   }
   async webSocketClose(ws) {
     try { ws.close(); } catch {}
-    await this.lostConnection(ws);
+    try { await this.lostConnection(ws); } catch (e) { if (!(e instanceof LimitError)) throw e; }
   }
   async webSocketError(ws) {
-    await this.lostConnection(ws);
+    try { await this.lostConnection(ws); } catch (e) { if (!(e instanceof LimitError)) throw e; }
   }
 }

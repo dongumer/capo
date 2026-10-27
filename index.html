@@ -260,6 +260,16 @@ h2 { margin: 0; font-family: var(--display); font-weight: 800; font-size: 24px; 
 #turnPill { position: absolute; z-index: 19; left: 50%; top: 40%; transform: translate(-50%, -50%); pointer-events: none; display: flex; align-items: center; gap: 10px; background: rgba(8,14,11,.88); border: 2px solid var(--gold); border-radius: 18px; padding: 10px 20px; font: 800 24px var(--display); animation: pill 1.3s ease-out forwards; }
 #turnPill i { font-style: normal; font-size: 34px; }
 @keyframes pill { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.8); } 15% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 75% { opacity: 1; } 100% { opacity: 0; } }
+#limit { position: fixed; inset: 0; z-index: 70; background: var(--ground); display: flex; align-items: center; justify-content: center; padding: calc(20px + var(--sa-t)) calc(20px + var(--sa-r)) calc(20px + var(--sa-b)) calc(20px + var(--sa-l)); }
+.limit-box { max-width: 420px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.limit-box h2 { font-size: 28px; line-height: 1.1; text-wrap: balance; }
+.limit-box p { margin: 0; color: var(--muted); font-size: 17px; text-wrap: pretty; }
+.limit-box .btn { width: 100%; margin-top: 6px; }
+.limit-cards { position: relative; width: 90px; height: 70px; }
+.limit-cards i { position: absolute; left: 30px; top: 4px; width: 38px; height: 54px; border-radius: 6px; background: var(--back) center/cover; box-shadow: 0 4px 10px var(--shadow); opacity: .9; }
+.limit-cards i:nth-child(1) { transform: rotate(-18deg) translateX(-14px); }
+.limit-cards i:nth-child(3) { transform: rotate(18deg) translateX(14px); }
+@media (orientation: landscape) and (max-height: 560px) { .limit-box h2 { font-size: 22px; } .limit-box { gap: 8px; } }
 #toast { position: fixed; z-index: 40; left: 50%; top: calc(60px + var(--sa-t)); transform: translateX(-50%); background: #1b2420; color: #fff; border-radius: 14px; padding: 9px 16px; font-weight: 700; font-size: 15px; box-shadow: 0 8px 24px rgba(0,0,0,.4); max-width: min(calc(var(--gw) * 0.9), 480px); text-align: center; transition: opacity .25s, transform .25s; }
 #toast.err { background: #8f2618; }
 #toast:not(.on) { opacity: 0; transform: translate(-50%, -10px); pointer-events: none; }
@@ -388,6 +398,14 @@ h2 { margin: 0; font-family: var(--display); font-weight: 800; font-size: 24px; 
   <div id="sheetHost"></div>
 </section>
 
+<div id="limit" hidden>
+  <div class="limit-box">
+    <div class="limit-cards"><i></i><i></i><i></i></div>
+    <h2>Límite de partidas alcanzado en el servidor</h2>
+    <p>Como el servidor del juego es gratuito, hay un límite de partidas al día. Volved a partir de la <b id="limitTime">1:00</b>.</p>
+    <button class="btn btn--main" data-act="closeLimit">Entendido</button>
+  </div>
+</div>
 <div id="toast"></div>
 <div id="conn" hidden>Reconectando…</div>
 </div>
@@ -603,13 +621,44 @@ function needName() {
 // ---------- Conexión ----------
 async function createRoom() {
   if (needName()) return;
+  let res;
+  try { res = await fetch(`${SERVER}/api/new?pid=${encodeURIComponent(S.pid)}`); }
+  catch { return (await serverLimited()) ? showLimit() : toast('No se ha podido crear la partida. Revisa la conexión a internet y prueba otra vez.', true); }
+  const r = await res.json().catch(() => ({}));
+  if (res.status === 429 || r.error === 'limit') return showLimit();
+  if (r.code) return connect(r.code);
+  toast(r.error || 'No se ha podido crear la partida. Prueba otra vez.', true);
+}
+
+// ---------- Cupo diario del servidor gratuito ----------
+// Si falla el servidor pero hay internet, se pregunta al servidor si es por el cupo. Si ni contesta
+// (Cloudflare corta antes de llegar al juego) y la propia web sí carga, también se da por agotado.
+async function serverLimited() {
   try {
-    const r = await fetch(`${SERVER}/api/new?pid=${encodeURIComponent(S.pid)}`).then(r => r.json());
-    if (!r.code) throw new Error(r.error || 'sin código');
-    connect(r.code);
+    const r = await fetch(`${SERVER}/api/status`, { cache: 'no-store' });
+    if (r.status === 429) return true;
+    const j = await r.json().catch(() => ({}));
+    return j.error === 'limit';
   } catch {
-    toast('No se ha podido crear la partida. Revisa la conexión a internet y prueba otra vez.', true);
+    try { await fetch(`manifest.webmanifest?c=${Date.now()}`, { cache: 'no-store' }); return navigator.onLine !== false; }
+    catch { return false; }
   }
+}
+// Hora local a la que se renueva el cupo (medianoche UTC: la 1:00 en España en invierno, las 2:00 en verano)
+function resetTime() {
+  const d = new Date(); d.setUTCHours(24, 0, 0, 0);
+  return d.toLocaleTimeString('es-ES', { hour: 'numeric', minute: '2-digit' });
+}
+function showLimit() {
+  S.closing = true;
+  store.del('room');
+  try { S.ws && S.ws.close(); } catch {}
+  S.ws = null; S.msg = null; S.V = null; S.code = null; S.queue = [];
+  closeSheet(); endDrag();
+  $('#conn').hidden = true;
+  show('home');
+  $('#limitTime').textContent = resetTime();
+  $('#limit').hidden = false;
 }
 
 function connect(code) {
@@ -620,10 +669,11 @@ function connect(code) {
   const q = new URLSearchParams({ pid: S.pid, name: S.name || 'Jugador', avatar: S.avatar, color: S.color });
   const ws = new WebSocket(`${WS_URL}/api/room/${code}?${q}`);
   S.ws = ws;
-  ws.onopen = () => { S.retry = 0; $('#conn').hidden = true; };
+  ws.onopen = () => { S.retry = 0; ws.opened = true; $('#conn').hidden = true; };
   ws.onmessage = e => {
     const m = JSON.parse(e.data);
     if (m.type === 'pong') return;
+    if (m.type === 'limit') return showLimit();
     if (m.type === 'fatal') { S.closing = true; store.del('room'); toast(m.error, true); S.msg = null; S.V = null; show('home'); history.replaceState(null, '', location.pathname + (SUF ? '?yo=' + params.get('yo') : '')); return; }
     if (m.type === 'error') { toast(m.error, true); sfx.bad(); return; }
     if (m.type === 'state') { S.queue.push(m); pump(); if (m.notice) setTimeout(() => toast(m.notice), 400); }
@@ -636,6 +686,8 @@ function connect(code) {
       return;
     }
     $('#conn').hidden = false;
+    // Si no consigue ni conectar dos veces seguidas, mira si es porque se ha acabado el cupo del día
+    if (!ws.opened && S.retry >= 1) serverLimited().then(lim => { if (lim && S.ws === ws) showLimit(); });
     const wait = Math.min(5000, 600 * 2 ** S.retry++);
     setTimeout(() => { if (S.ws === ws && !S.closing) connect(code); }, wait);
   };
@@ -1514,6 +1566,7 @@ const actions = {
   nextRound: () => { closeSheet(); S.sheet = null; send({ a: 'nextRound' }); },
   toLobby: () => { closeSheet(); S.sheet = null; send({ a: 'toLobby' }); },
   menu: () => openSheet('menu'),
+  closeLimit: () => { $('#limit').hidden = true; renderHome(); },
   scores: () => openSheet(S.V && (S.V.phase === 'roundEnd' || S.V.phase === 'gameEnd') ? 'results' : 'scores'),
   rules: () => openSheet('rules'),
   closeSheet: () => closeSheet(),
@@ -1532,7 +1585,8 @@ renderHome();
 const saved = store.get('room', null);
 const invited = (params.get('sala') || '').toUpperCase();
 show('home');
-if (saved && (!invited || invited === saved) && S.name) connect(saved);
+if (params.has('probarLimite')) showLimit();
+else if (saved && (!invited || invited === saved) && S.name) connect(saved);
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});

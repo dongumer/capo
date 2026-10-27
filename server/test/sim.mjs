@@ -46,7 +46,7 @@ for (let g = 0; g < 400; g++) {
       assert.ok(st.players[j].left && st.players[j].hand.length === 0);
       checkPrivacy(st, r.events);
       if (r.alone) { alone = true; alones++; break; }
-      assert.ok(!st.players[st.turn].left || st.phase !== 'play', 'turno de alguien que se ha ido');
+      assert.ok(!st.players[st.turn].left || st.phase !== 'play' || st.step === 'closing', 'turno de alguien que se ha ido'); // en la última oportunidad no es el turno de nadie
       if (st.phase === 'play' || st.phase === 'peek') assert.equal(countCards(st), 40);
       continue;
     }
